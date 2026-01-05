@@ -13,13 +13,13 @@ These steps only need to be performed once to set up and configure the scripts.
 
 ### 1. Copy tools to your ROCKS home
 
-From your local machine, move the `sherpa_on_rocks` directory into your ROCKS home area:
+From your local machine, move the `sherpa_on_the_rocks` directory into your ROCKS home area:
 
 ```bash
-mv sherpa_on_rocks /net/theorie/rocks/$USER
+mv sherpa_on_the_rocks /net/theorie/rocks/$USER
 ```
 
-If you choose to move `sherpa_on_rocks` to a different directory, adjust all subsequent commands accordingly.
+If you choose to move `sherpa_on_the_rocks` to a different directory, adjust all subsequent commands accordingly.
 
 ### 2. Configure the Sherpa installation path
 
@@ -41,7 +41,7 @@ Example:
 USERNAME    = moritz.pabst
 ```
 
-If you moved `sherpa_on_rocks` to a different location in step 1.1, make sure to additionally update the path to `run_sherpa.sh` in the argument section.
+If you moved `sherpa_on_the_rocks` to a different location in step 1.1, make sure to additionally update the path to `run_sherpa.sh` in the argument section.
 
 
 ## 1. Preparing and submitting a SHERPA job
@@ -115,20 +115,20 @@ To keep individual jobs within a chosen walltime (e.g. the 24‑hour queue), you
 From the <process_dir> directory which contains the <production_dir> folder:
 
 ```bash
-bash ~/sherpa_on_rocks/prepare_runs.sh <production_dir> <N_subruns>
+bash ~/sherpa_on_the_rocks/prepare_runs.sh <production_dir> <N_subruns>
 ```
 
 - If `<production_dir>` has subdirectories, each of them will get `<N_subruns>` numbered subfolders.
 - All created subrun directories are written to `runs.txt`, which is later used by HTCondor.
 
-Note: If you run this command on a local machine, you need to adjust the path in the command above (`/net/theorie/rocks/$USER/sherpa_on_rocks/prepare_runs.sh`)
+Note: If you run this command on a local machine, you need to adjust the path in the command above (`/net/theorie/rocks/$USER/sherpa_on_the_rocks/prepare_runs.sh`)
 
 ### 1.5 Submit all subruns
 
 From the <process_dir> directory which contains the `runs.txt` file submit the jobs using the provided job description file:
 
 ```bash
-condor_submit ~/sherpa_on_rocks/sherpa.jdf
+condor_submit ~/sherpa_on_the_rocks/sherpa.jdf
 ```
 
 The submit file will create one job per line of `runs.txt`.
@@ -159,7 +159,7 @@ After all jobs have finished, merge the YODA output files into a single file per
 From the directory containing your production runs:
 
 ```bash
-bash ~/sherpa_on_rocks/yodamerge_runs.sh <production_dir>
+bash ~/sherpa_on_the_rocks/yodamerge_runs.sh <production_dir>
 ```
 
 - If `<production_dir>` contains run subdirectories that themselves contain subrun subdirectories, each run subdirectory will get one merged `<run>.yoda` file.
@@ -167,15 +167,15 @@ bash ~/sherpa_on_rocks/yodamerge_runs.sh <production_dir>
 - Optionally, add `--rm` to remove the subrun directories after a successful merge and free space:
 
 ```bash
-bash ~/sherpa_on_rocks/yodamerge_runs.sh --rm <production_dir>
+bash ~/sherpa_on_the_rocks/yodamerge_runs.sh --rm <production_dir>
 ```
 
-Note: If you run this command on a local machine, you need to adjust the path in the command above (`/net/theorie/rocks/$USER/sherpa_on_rocks/yodamerge_runs.sh`)
+Note: If you run this command on a local machine, you need to adjust the path in the command above (`/net/theorie/rocks/$USER/sherpa_on_the_rocks/yodamerge_runs.sh`)
 
 
 This completes a typical Sherpa production cycle on ROCKS: initialize, split into subruns, submit via HTCondor, then merge the resulting YODA files. The scripts `yodamerge_runs.sh` and `prepare_runs.sh` include additional features. Run them without arguments to see all available options:
 
 ```bash
-bash ~/sherpa_on_rocks/yodamerge_runs.sh
-bash ~/sherpa_on_rocks/prepare_runs.sh
+bash ~/sherpa_on_the_rocks/yodamerge_runs.sh
+bash ~/sherpa_on_the_rocks/prepare_runs.sh
 ```
