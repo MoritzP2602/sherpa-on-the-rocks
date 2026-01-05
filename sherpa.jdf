@@ -1,0 +1,11 @@
+Executable  = /bin/bash
+USERNAME    = YOUR_USERNAME
+LOGDIR      = condor_output
+MAXRUNTIME  = 86400
+Arguments   = /home/$(USERNAME)/sherpa_on_rocks/run_sherpa.sh $(folder) $(LOGDIR) $(Cluster) $(Process) $(MAXRUNTIME)
++MaxRuntime = $(MAXRUNTIME)
+max_idle    = 1000
+
+Log         = $(LOGDIR)/job.$(Cluster).$(Process).log
+
+Queue folder from runs.txt
