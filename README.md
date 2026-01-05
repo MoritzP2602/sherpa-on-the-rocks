@@ -1,8 +1,8 @@
 <div align="center">
   <img src="logo.png" width="400"/>
 </div>
+<br>
 
-# Running Sherpa on the ROCKS Cluster
 
 This directory provides helper scripts and HTCondor job description files for running SHERPA jobs on the ROCKS cluster.
 
