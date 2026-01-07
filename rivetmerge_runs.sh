@@ -59,7 +59,7 @@ merge_dir() {
     else
         echo "Merging YODA files into $OUTFILE..."
         if command -v rivet-merge >/dev/null 2>&1; then
-            rivet-merge "${FILES[@]}" -o "$OUTFILE"
+            rivet-merge --assume-reentrant -e "${FILES[@]}" -o "$OUTFILE" -q
             if [ "$REMOVE_SUBDIRS" = true ] && [ -f "$OUTFILE" ]; then
                 for subdir in "$dir"/*; do
                     if [ -d "$subdir" ]; then
@@ -92,7 +92,7 @@ merge_flat() {
     else
         echo "Merging YODA files from all subdirectories into $OUTFILE..."
         if command -v rivet-merge >/dev/null 2>&1; then
-            rivet-merge "${FILES[@]}" -o "$OUTFILE"
+            rivet-merge --assume-reentrant -e "${FILES[@]}" -o "$OUTFILE" -q
             if [ "$REMOVE_SUBDIRS" = true ] && [ -f "$OUTFILE" ]; then
                 for subdir in "$PREFIX"/*; do
                     if [ -d "$subdir" ]; then
