@@ -138,23 +138,24 @@ Note: You can only submit runs on the cluster and NOT from your local machine.
 
 ## 2. Monitoring Jobs
 
-List all your running jobs to find their IDs (`<cluster>.<process>`):
+List all your running jobs to find their IDs (`<job-id> = <cluster>.<process>`):
 
 ```bash
 condor_q -run
 ```
 
-To inspect a specific job's output:
+To inspect a specific running job's output:
 
 ```bash
 condor_ssh_to_job <job-id>
-cat $TMPDIR/job.<cluster>.<process>.out
+cat $TMPDIR/job.<job-id>.out
 ```
 
+Once a job is finished, the .out, .err and .log files are stored in `condor_output` (e.g. `job.<job-id>.out`). A summary of all finished jobs can be found in `condor_output/overview.<cluster>.log`, including the final status of each job (COMPLETE, TIMEOUT or FAILED).
 
 ## 3. Merging YODA output
 
-After all jobs have finished, merge the YODA output files into a single file per run using `yodamerge`.
+After all jobs have finished, merge the YODA output files from the subruns into a single file per run using `yodamerge`.
 
 From the directory containing your production runs:
 
@@ -162,15 +163,15 @@ From the directory containing your production runs:
 bash ~/sherpa_on_the_rocks/yodamerge_runs.sh <production_dir>
 ```
 
-- If `<production_dir>` contains run subdirectories that themselves contain subrun subdirectories, each run subdirectory will get one merged `<run>.yoda` file.
+- If `<production_dir>` contains run subdirectories that themselves contain subrun subdirectories, each run subdirectory will get one merged `<run_variantX>.yoda` file.
 - If `<production_dir>` only contains subrun directories, a single merged `<production_dir>.yoda` is produced.
-- Optionally, add `--rm` to remove the subrun directories after a successful merge and free space:
+- Optionally, add `--rm` to remove the subrun directories after a successful merge to free space:
 
 ```bash
 bash ~/sherpa_on_the_rocks/yodamerge_runs.sh --rm <production_dir>
 ```
 
-Note: If you run this command on a local machine, you need to adjust the path in the command above (`/net/theorie/rocks/$USER/sherpa_on_the_rocks/yodamerge_runs.sh`)
+Note: If you run this command on a local machine, you need to adjust the path in the command above (`/net/theorie/rocks/$USER/sherpa_on_the_rocks/yodamerge_runs.sh`).
 
 
 This completes a typical Sherpa production cycle on ROCKS: initialize, split into subruns, submit via HTCondor, then merge the resulting YODA files. The scripts `yodamerge_runs.sh` and `prepare_runs.sh` include additional features. Run them without arguments to see all available options:
@@ -179,3 +180,7 @@ This completes a typical Sherpa production cycle on ROCKS: initialize, split int
 bash ~/sherpa_on_the_rocks/yodamerge_runs.sh
 bash ~/sherpa_on_the_rocks/prepare_runs.sh
 ```
+
+## License
+
+MIT License
