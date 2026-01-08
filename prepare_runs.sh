@@ -55,9 +55,14 @@ process_folder() {
         for dir in "$PREFIX"/*; do
             [ -d "$dir" ] || continue
             dir_name=$(basename "$dir")
-            if [ -f "$dir/${dir_name}.yoda" ]; then
-                continue
-            else
+            skip_dir=false
+            if [ "$ANY_YODA" = true ] && [ -n "$(find "$dir" -maxdepth 1 -name "*.yoda" -type f)" ]; then
+                skip_dir=true
+            elif [ -f "$dir/${dir_name}.yoda" ]; then
+                skip_dir=true
+            fi
+
+            if [ "$skip_dir" = false ]; then
                 has_subdirs=false
                 for subdir in "$dir"/*; do
                     if [ -d "$subdir" ]; then
@@ -69,10 +74,16 @@ process_folder() {
                     for subdir in "$dir"/*; do
                         [ -d "$subdir" ] || continue
                         subdir_name=$(basename "$subdir")
-                        if [ -f "$subdir/${subdir_name}.yoda.gz" ]; then
-                            continue
+                        skip_subdir=false
+                        if [ "$ANY_YODA" = true ] && [ -n "$(find "$subdir" -maxdepth 1 -name "*.yoda" -type f)" ]; then
+                            skip_subdir=true
+                        elif [ -f "$subdir/${subdir_name}.yoda.gz" ]; then
+                            skip_subdir=true
                         fi
-                        echo "$subdir" >> "$OUTFILE"
+                        
+                        if [ "$skip_subdir" = false ]; then
+                            echo "$subdir" >> "$OUTFILE"
+                        fi
                     done
                 else
                     echo "$dir" >> "$OUTFILE"
