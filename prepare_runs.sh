@@ -50,7 +50,30 @@ process_folder() {
         echo "Listing subdirectories in $PREFIX..."
         for dir in "$PREFIX"/*; do
             [ -d "$dir" ] || continue
-            echo "$dir" >> "$OUTFILE"
+            dir_name=$(basename "$dir")
+            if [ -f "$dir/${dir_name}.yoda" ]; then
+                continue
+            else
+                has_subdirs=false
+                for subdir in "$dir"/*; do
+                    if [ -d "$subdir" ]; then
+                        has_subdirs=true
+                        break
+                    fi
+                done
+                if [ "$has_subdirs" = true ]; then
+                    for subdir in "$dir"/*; do
+                        [ -d "$subdir" ] || continue
+                        subdir_name=$(basename "$subdir")
+                        if [ -f "$subdir/${subdir_name}.yoda.gz" ]; then
+                            continue
+                        fi
+                        echo "$subdir" >> "$OUTFILE"
+                    done
+                else
+                    echo "$dir" >> "$OUTFILE"
+                fi
+            fi
         done
     else
         width=${#n}
