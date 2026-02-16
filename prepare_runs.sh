@@ -58,6 +58,8 @@ process_folder() {
             skip_dir=false
             if [ "$ANY_YODA" = true ] && [ -n "$(find "$dir" -maxdepth 1 -name "*.yoda" -type f)" ]; then
                 skip_dir=true
+            elif [ -f "$dir/${dir_name}.yoda.gz" ]; then
+                skip_dir=true
             elif [ -f "$dir/${dir_name}.yoda" ]; then
                 skip_dir=true
             fi

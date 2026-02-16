@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+
+import os
+import re
+import sys
+from collections import defaultdict
+from datetime import timedelta
+
+def parse_time(timestr):
+    # Format: d-hh:mm:ss or hh:mm:ss
+    if '-' in timestr:
+        d, hms = timestr.split('-')
+        d = int(d)
+    else:
+        d = 0
+        hms = timestr
+    h, m, s = map(int, hms.split(':'))
+    return timedelta(days=d, hours=h, minutes=m, seconds=s).total_seconds()
+
+def main(paths):
+    yaml_stats = defaultdict(lambda: {'events': 0, 'time': 0.0, 'runs': 0, 'run_times_per_1M': []})
+    
+    if len(paths) == 1 and os.path.isdir(paths[0]):
+        folder = paths[0]
+        files = [os.path.join(folder, f) for f in os.listdir(folder) if f.endswith('.out')]
+        base_path = os.path.dirname(os.path.abspath(folder))
+    else:
+        files = [f for f in paths if f.endswith('.out')]
+        if files:
+            first_file_dir = os.path.dirname(os.path.abspath(files[0]))
+            base_path = os.path.dirname(first_file_dir)
+        else:
+            base_path = os.getcwd()
+
+    base_path =  base_path.split("/")[-1]
+    
+    total_files = len(files)
+    for idx, filepath in enumerate(files, 1):
+        print(f"\rProcessing {idx}/{total_files} files...", end='', flush=True)
+        
+        with open(filepath) as f:
+            content = f.read()
+        # Extract YAML path
+        yaml_match = re.search(r'YAML\s*:\s*(.*\.yaml)', content)
+        if not yaml_match:
+            continue
+        yaml_path = yaml_match.group(1).strip()
+        # Extract number of events
+        events_match = re.search(r'Generated events:\s*(\d+)', content)
+        if not events_match:
+            continue
+        events = int(events_match.group(1))
+        # Extract elapsed time
+        time_match = re.search(r'Total elapsed time:\s*([0-9\-:]+)', content)
+        if not time_match:
+            continue
+        elapsed = parse_time(time_match.group(1))
+
+        yaml_stats[yaml_path]['events'] += events
+        yaml_stats[yaml_path]['time']   += elapsed
+        yaml_stats[yaml_path]['runs']   += 1
+
+        time_per_1M = (elapsed / events) * 1e6 / 3600.0
+        yaml_stats[yaml_path]['run_times_per_1M'].append(time_per_1M)
+
+    warning_msg = ""
+    print('\r' + ' ' * 50 + '\r', end='', flush=True)
+    
+    print(f"{'GROUP':40} {'Avg time [h] per 1M events':>25} {'Min':>10} {'Max':>10} {'Total events':>15} {'Runs':>5}")
+    print('-'*135)
+    for yaml, stats in yaml_stats.items():
+        if stats['events'] == 0:
+            continue
+        avg_time_per_1M = (stats['time'] / stats['events']) * 1e6 / 3600.0
+        min_time_per_1M = min(stats['run_times_per_1M'])
+        max_time_per_1M = max(stats['run_times_per_1M'])
+        
+        yaml_dir = os.path.dirname(yaml)
+        
+        if len(yaml_dir.split(base_path)) > 2:
+            if len(warning_msg) == 0:
+                warning_msg += "Warning: YAML path contains base path multiple times, uses first occurrence for output path splitting.\n"
+            warning_msg += "YAML path: " + yaml_dir + ", base path: " + base_path + "\n"          
+        short_dir = yaml_dir.split(base_path, 1)[1].strip('/')
+        
+        print(f"{short_dir:40} {avg_time_per_1M:25.2f} {min_time_per_1M:10.2f} {max_time_per_1M:10.2f} {stats['events']:15d} {stats['runs']:5d}")
+    print('-'*135)
+    if len(warning_msg) > 0:
+        print("\n" + warning_msg)
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python3 timing.py <folder> OR python3 timing.py <file1> [<file2> ...]")
+        sys.exit(1)
+    main(sys.argv[1:])
