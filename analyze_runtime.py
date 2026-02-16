@@ -90,6 +90,6 @@ def main(paths):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python3 timing.py <folder> OR python3 timing.py <file1> [<file2> ...]")
+        print("Usage: python3 analyze_runtime.py <folder> OR python3 timing.py <file1> [<file2> ...]")
         sys.exit(1)
     main(sys.argv[1:])
