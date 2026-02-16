@@ -155,12 +155,16 @@ Once a job is finished, the .out, .err and .log files are stored in `condor_outp
 
 ## 3. Merging YODA output
 
-After all jobs have finished, merge the YODA output files from the subruns into a single file per run using `yodamerge`.
+After all jobs have finished, merge the YODA output files from the subruns into a single file per run using `yodamerge`/`rivet-merge`.
 
 From the directory containing your production runs:
 
 ```bash
 bash ~/sherpa_on_the_rocks/yodamerge_runs.sh <production_dir>
+```
+or
+```bash
+bash ~/sherpa_on_the_rocks/rivetmerge_runs.sh <production_dir>
 ```
 
 - If `<production_dir>` contains run subdirectories that themselves contain subrun subdirectories, each run subdirectory will get one merged `<run_variantX>.yoda` file.
@@ -173,8 +177,22 @@ bash ~/sherpa_on_the_rocks/yodamerge_runs.sh --rm <production_dir>
 
 Note: If you run this command on a local machine, you need to adjust the path in the command above (`/net/theorie/rocks/$USER/sherpa_on_the_rocks/yodamerge_runs.sh`).
 
+## 4. Generate runtime summary
 
-This completes a typical Sherpa production cycle on ROCKS: initialize, split into subruns, submit via HTCondor, then merge the resulting YODA files. The scripts `yodamerge_runs.sh` and `prepare_runs.sh` include additional features. Run them without arguments to see all available options:
+The output of all runs is stored in `condor_output` per default. To generate a summary (avg., min., max.) of the runtime for all different runcards:
+
+```bash
+python3 ~/sherpa_on_the_rocks/analyze_runtime.py condor_output
+```
+
+To generate this overview for a specific batch use:
+
+```bash
+python3 ~/sherpa_on_the_rocks/analyze_runtime.py condor_output/job.<cluster>.*
+```
+
+
+This completes a typical Sherpa production cycle on ROCKS: initialize, split into subruns, submit via HTCondor, then merge the resulting YODA files. The scripts `yodamerge_runs.sh`/`rivetmerge_runs.sh` and `prepare_runs.sh` include additional features. Run them without arguments to see all available options:
 
 ```bash
 bash ~/sherpa_on_the_rocks/yodamerge_runs.sh
