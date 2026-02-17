@@ -4,6 +4,8 @@
 <br>
 
 
+# sherpa_on_the_rocks
+
 This directory provides helper scripts and HTCondor job description files for running SHERPA jobs on the ROCKS cluster.
 
 
@@ -202,3 +204,4 @@ bash ~/sherpa_on_the_rocks/prepare_runs.sh
 ## License
 
 MIT License
+
