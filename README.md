@@ -23,6 +23,8 @@ mv sherpa_on_the_rocks /net/theorie/rocks/$USER
 
 If you choose to move `sherpa_on_the_rocks` to a different directory, adjust all subsequent commands accordingly.
 
+Note: It may be convenient to also keep a copy of `sherpa_on_the_rocks` in your local home directory, so you can run the excat same commands on your local machine and on the cluster, without having to adjust the paths in the commands below (run `cp -r /net/theorie/rocks/$USER/sherpa_on_the_rocks ~/`).
+
 ### 2. Configure the Sherpa installation path
 
 Edit `run_sherpa.sh` and set the path to your Sherpa binary (relative to your ROCKS home directory) near the top of the file.
@@ -134,7 +136,7 @@ bash ~/sherpa_on_the_rocks/prepare_runs.sh <production_dir> <N_subruns>
 - If `<production_dir>` has subdirectories, each of them will get `<N_subruns>` numbered subfolders.
 - All created subrun directories are written to `runs.txt`, which is later used by HTCondor.
 
-Note: If you run this command on a local machine, you need to adjust the path in the command above (`/net/theorie/rocks/$USER/sherpa_on_the_rocks/prepare_runs.sh`)
+Note: If you run this command on your local machine and you do not have a copy of `sherpa_on_the_rocks` in your local home directory, you need to adjust the path in the command above (`/net/theorie/rocks/$USER/sherpa_on_the_rocks/prepare_runs.sh`).
 
 ### 1.5 Submit all subruns
 
@@ -166,6 +168,7 @@ cat $TMPDIR/job.<job-id>.out
 
 Once a job is finished, the .out, .err and .log files are stored in `condor_output` (e.g. `job.<job-id>.out`). A summary of all finished jobs can be found in `condor_output/overview.<cluster>.log`, including the final status of each job (COMPLETE, TIMEOUT or FAILED).
 
+
 ## 3. Merging YODA output
 
 After all jobs have finished, merge the YODA output files from the subruns into a single file per run using `yodamerge`/`rivet-merge`.
@@ -188,17 +191,17 @@ bash ~/sherpa_on_the_rocks/rivetmerge_runs.sh <production_dir>
 bash ~/sherpa_on_the_rocks/yodamerge_runs.sh --rm <production_dir>
 ```
 
-Note: If you run this command on a local machine, you need to adjust the path in the command above (`/net/theorie/rocks/$USER/sherpa_on_the_rocks/yodamerge_runs.sh`).
+Note: If you run this command on your local machine, you need to adjust the path in the command above (`/net/theorie/rocks/$USER/sherpa_on_the_rocks/yodamerge_runs.sh`).
 
 ## 4. Generate runtime summary
 
-The output of all runs is stored in `condor_output` per default. To generate a summary (avg., min., max.) of the runtime for all different runcards:
+The output of all runs is stored in `condor_output` per default. You can generate a summary (avg., min., max.) of the runtime for all different runcards by running:
 
 ```bash
 python3 ~/sherpa_on_the_rocks/analyze_runtime.py condor_output
 ```
 
-To generate this overview for a specific batch use:
+To generate this overview only for specific batch, use:
 
 ```bash
 python3 ~/sherpa_on_the_rocks/analyze_runtime.py condor_output/job.<cluster>.*
