@@ -67,7 +67,7 @@ def main(paths):
     print('\r' + ' ' * 50 + '\r', end='', flush=True)
     
     print(f"{'GROUP':40} {'Avg time [h] per 1M events':>25} {'Min':>10} {'Max':>10} {'Total events':>15} {'Runs':>5}")
-    print('-'*135)
+    print('-'*112)
     for yaml, stats in yaml_stats.items():
         if stats['events'] == 0:
             continue
@@ -84,7 +84,7 @@ def main(paths):
         short_dir = yaml_dir.split(base_path, 1)[1].strip('/')
         
         print(f"{short_dir:40} {avg_time_per_1M:25.2f} {min_time_per_1M:10.2f} {max_time_per_1M:10.2f} {stats['events']:15d} {stats['runs']:5d}")
-    print('-'*135)
+    print('-'*112)
     if len(warning_msg) > 0:
         print("\n" + warning_msg)
 

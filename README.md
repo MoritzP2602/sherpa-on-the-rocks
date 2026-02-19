@@ -45,6 +45,17 @@ USERNAME    = moritz.pabst
 
 If you moved `sherpa_on_the_rocks` to a different location in step 1.1, make sure to additionally update the path to `run_sherpa.sh` in the argument section.
 
+### 4. (Optional) Make the scripts executable
+
+You can make the scripts executable to run them without explicitly calling `bash`/`python3`:
+
+```bash
+chmod +x ~/sherpa_on_the_rocks/prepare_runs.sh
+chmod +x ~/sherpa_on_the_rocks/yodamerge_runs.sh
+chmod +x ~/sherpa_on_the_rocks/rivetmerge_runs.sh
+chmod +x ~/sherpa_on_the_rocks/analyze_runtime.py
+```
+
 
 ## 1. Preparing and submitting a SHERPA job
 
@@ -193,12 +204,14 @@ To generate this overview for a specific batch use:
 python3 ~/sherpa_on_the_rocks/analyze_runtime.py condor_output/job.<cluster>.*
 ```
 
+Note: If you changed the condor output directory, you need to adjust the directory in the command above.
 
-This completes a typical Sherpa production cycle on ROCKS: initialize, split into subruns, submit via HTCondor, then merge the resulting YODA files. The scripts `yodamerge_runs.sh`/`rivetmerge_runs.sh` and `prepare_runs.sh` include additional features. Run them without arguments to see all available options:
+
+This completes a typical Sherpa production cycle on ROCKS: initialize, split into subruns, submit via HTCondor, then merge the resulting YODA files. The scripts `prepare_runs.sh` and `yodamerge_runs.sh`/`rivetmerge_runs.sh` offer additional features. Run them without arguments to see all available options:
 
 ```bash
-bash ~/sherpa_on_the_rocks/yodamerge_runs.sh
 bash ~/sherpa_on_the_rocks/prepare_runs.sh
+bash ~/sherpa_on_the_rocks/yodamerge_runs.sh
 ```
 
 ## License
