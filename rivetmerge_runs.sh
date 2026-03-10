@@ -91,7 +91,7 @@ merge_dir() {
         else
             echo "Merging YODA files into $OUTFILE..."
             if command -v rivet-merge >/dev/null 2>&1; then
-                rivet-merge "${FILES[@]}" -o "$OUTFILE"
+                rivet-merge -e "${FILES[@]}" -o "$OUTFILE"
                 if [ "$REMOVE_SUBDIRS" = true ] && [ -f "$OUTFILE" ] && [ -z "$OUTPUT_DIR" ]; then
                     for subdir in "$dir"/*; do
                         if [ -d "$subdir" ]; then
@@ -143,7 +143,7 @@ merge_flat() {
         else
             echo "Merging YODA files from all subdirectories into $OUTFILE..."
             if command -v rivet-merge >/dev/null 2>&1; then
-                rivet-merge "${FILES[@]}" -o "$OUTFILE"
+                rivet-merge -e "${FILES[@]}" -o "$OUTFILE"
                 if [ "$REMOVE_SUBDIRS" = true ] && [ -f "$OUTFILE" ] && [ -z "$OUTPUT_DIR" ]; then
                     for subdir in "$PREFIX"/*; do
                         if [ -d "$subdir" ]; then
@@ -184,7 +184,7 @@ merge_chunked() {
             local temp_file="$temp_dir/chunk_${chunk_num}.yoda"
             (
                 echo "Merging chunk $chunk_num (${#chunk_files[@]} files) -> $(basename "$temp_file")"
-                rivet-merge "${chunk_files[@]}" -o "$temp_file"
+                rivet-merge -e "${chunk_files[@]}" -o "$temp_file"
             ) &
             
             chunk_num=$((chunk_num + 1))
@@ -203,7 +203,7 @@ merge_chunked() {
         echo "Merging $chunk_num temporary files into final output..."
         mapfile -t temp_files < <(find "$temp_dir" -name "chunk_*.yoda" | sort)
         
-        if rivet-merge "${temp_files[@]}" -o "$outfile"; then
+        if rivet-merge -e "${temp_files[@]}" -o "$outfile"; then
             echo "Cleaning up temporary files..."
             rm -rf "$temp_dir"
             trap - EXIT INT TERM
