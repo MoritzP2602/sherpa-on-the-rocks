@@ -42,14 +42,21 @@ is_number() {
 
 FOLDERS=()
 NPROC=4
+NPROC_USER_SET=false
 
 for arg in "$@"; do
     if is_number "$arg" && [ "$arg" = "${@: -1}" ]; then
         NPROC="$arg"
+        NPROC_USER_SET=true
     else
         FOLDERS+=("$arg")
     fi
 done
+
+if ! is_number "$NPROC" || [ "$NPROC" -lt 1 ]; then
+    echo "Error: nproc must be a positive integer (>= 1)."
+    exit 1
+fi
 
 if [ ${#FOLDERS[@]} -eq 0 ]; then
     echo "Error: No folders provided!"
@@ -63,7 +70,6 @@ merge_dir() {
     if [ -n "$OUTPUT_DIR" ]; then
         rel_path="${dir#$BASE_INPUT_DIR/}"
         out_dir="$OUTPUT_DIR/$rel_path"
-        mkdir -p "$out_dir"
         OUTFILE="$out_dir/${YODA}.yoda"
     else
         out_dir="$dir"
@@ -71,7 +77,7 @@ merge_dir() {
     fi
     
     if [ -f "$OUTFILE" ]; then
-        echo "Skipping $dir: $OUTFILE already exists..."
+        echo "Skipping $dir: $OUTFILE already exists"
         return
     fi
 
@@ -83,8 +89,11 @@ merge_dir() {
     fi
 
     if [ "${#FILES[@]}" -eq 0 ]; then
-        echo "No .yoda.gz/.yoda files found in subdirectories of $dir."
+        echo "Skipping $dir: No .yoda.gz/.yoda files found in subdirectories."
     else
+        if [ -n "$OUTPUT_DIR" ]; then
+            mkdir -p "$out_dir"
+        fi
         if [ "$CHUNK_SIZE" -gt 0 ]; then
             echo "Merging YODA files into $OUTFILE using chunked mode..."
             merge_chunked "$out_dir" "$OUTFILE" "${FILES[@]}"
@@ -113,7 +122,6 @@ merge_flat() {
     
     if [ -n "$OUTPUT_DIR" ]; then
         out_dir="$OUTPUT_DIR"
-        mkdir -p "$out_dir"
         YODA=$(basename "$OUTPUT_DIR")
         OUTFILE="$out_dir/${YODA}.yoda"
     else
@@ -123,7 +131,7 @@ merge_flat() {
     fi
     
     if [ -f "$OUTFILE" ]; then
-        echo "Skipping: $OUTFILE already exists..."
+        echo "Skipping: $OUTFILE already exists"
         return
     fi
     
@@ -135,8 +143,11 @@ merge_flat() {
     fi
     
     if [ "${#FILES[@]}" -eq 0 ]; then
-        echo "No .yoda/.yoda.gz files found in subdirectories of $PREFIX."
+        echo "Skipping $PREFIX: No .yoda/.yoda.gz files found in subdirectories."
     else
+        if [ -n "$OUTPUT_DIR" ]; then
+            mkdir -p "$out_dir"
+        fi
         if [ "$CHUNK_SIZE" -gt 0 ]; then
             echo "Merging YODA files from all subdirectories into $OUTFILE using chunked mode..."
             merge_chunked "$out_dir" "$OUTFILE" "${FILES[@]}"
@@ -189,14 +200,12 @@ merge_chunked() {
             
             chunk_num=$((chunk_num + 1))
             
-            # Wait when we reach NPROC parallel jobs
             if (( chunk_num % NPROC == 0 )); then
                 echo "Waiting for batch to complete..."
                 wait
             fi
         done
         
-        # Wait for any remaining jobs
         echo "Waiting for final batch to complete..."
         wait
 
@@ -248,6 +257,8 @@ for folder in "${FOLDERS[@]}"; do
         echo "Warning: No directory named $PREFIX! Skipping..."
         continue
     fi
+
+    echo "Scanning input folder: $PREFIX"
     
     BASE_INPUT_DIR="$PREFIX"
     export BASE_INPUT_DIR
@@ -261,20 +272,82 @@ for folder in "${FOLDERS[@]}"; do
     done
 
     if [ "$has_nested_subdirs" = true ]; then
+        nested_count=0
         while IFS= read -r dir; do
             ALL_NESTED_DIRS+=("$dir")
+            nested_count=$((nested_count + 1))
         done < <(find "$PREFIX" -mindepth 1 -maxdepth 1 -type d)
     else
         ALL_FLAT_DIRS+=("$PREFIX")
     fi
 done
 
+TOTAL_DIRS=$(( ${#ALL_NESTED_DIRS[@]} + ${#ALL_FLAT_DIRS[@]} ))
+
+if [ "$TOTAL_DIRS" -eq 0 ]; then
+    echo "No valid directories found to merge."
+    exit 0
+fi
+
+if [ "$NPROC_USER_SET" = false ]; then
+    if [ "$TOTAL_DIRS" -lt 4 ]; then
+        NPROC="$TOTAL_DIRS"
+    else
+        NPROC=4
+    fi
+fi
+
+if [ "$CHUNK_SIZE" -gt 0 ]; then
+    CHUNKED_DISPLAY="enabled (size: $CHUNK_SIZE)"
+else
+    CHUNKED_DISPLAY="disabled"
+fi
+
+if [ "$NMAX" -gt 0 ]; then
+    NMAX_DISPLAY="$NMAX"
+else
+    NMAX_DISPLAY="all"
+fi
+
+if [ -n "$OUTPUT_DIR" ]; then
+    OUTPUT_DIR_DISPLAY="$OUTPUT_DIR"
+    if [ "$REMOVE_SUBDIRS" = true ]; then
+        REMOVE_SUBDIRS_DISPLAY="ignored (with --output)"
+    else
+        REMOVE_SUBDIRS_DISPLAY="false"
+    fi
+else
+    OUTPUT_DIR_DISPLAY="<in-place>"
+    REMOVE_SUBDIRS_DISPLAY="$REMOVE_SUBDIRS"
+fi
+
+echo ""
+echo "Merge configuration:"
+echo "  input folders  : ${#FOLDERS[@]}"
+echo "  total targets  : $TOTAL_DIRS"
+echo "  parallel jobs  : $NPROC"
+echo "  chunked mode   : $CHUNKED_DISPLAY"
+echo "  nmax           : $NMAX_DISPLAY"
+echo "  remove subdirs : $REMOVE_SUBDIRS_DISPLAY"
+echo "  output dir     : $OUTPUT_DIR_DISPLAY"
+echo ""
+
 if [ ${#ALL_NESTED_DIRS[@]} -gt 0 ]; then
-    echo "Processing ${#ALL_NESTED_DIRS[@]} nested directories with $NPROC parallel jobs..."
-    printf "%s\n" "${ALL_NESTED_DIRS[@]}" | xargs -n 1 -P "$NPROC" bash -c 'merge_dir "$0"'
+    NESTED_NPROC="$NPROC"
+    if [ ${#ALL_NESTED_DIRS[@]} -lt "$NESTED_NPROC" ]; then
+        NESTED_NPROC=${#ALL_NESTED_DIRS[@]}
+    fi
+    echo "Processing ${#ALL_NESTED_DIRS[@]} nested directories with $NESTED_NPROC parallel jobs..."
+    printf "%s\n" "${ALL_NESTED_DIRS[@]}" | xargs -n 1 -P "$NESTED_NPROC" bash -c 'merge_dir "$0"'
 fi
 
 if [ ${#ALL_FLAT_DIRS[@]} -gt 0 ]; then
-    echo "Processing ${#ALL_FLAT_DIRS[@]} flat directories with $NPROC parallel jobs..."
-    printf "%s\n" "${ALL_FLAT_DIRS[@]}" | xargs -n 1 -P "$NPROC" bash -c 'merge_flat "$0"'
+    FLAT_NPROC="$NPROC"
+    if [ ${#ALL_FLAT_DIRS[@]} -lt "$FLAT_NPROC" ]; then
+        FLAT_NPROC=${#ALL_FLAT_DIRS[@]}
+    fi
+    echo "Processing ${#ALL_FLAT_DIRS[@]} flat directories with $FLAT_NPROC parallel jobs..."
+    printf "%s\n" "${ALL_FLAT_DIRS[@]}" | xargs -n 1 -P "$FLAT_NPROC" bash -c 'merge_flat "$0"'
 fi
+
+echo "Done! Merge run finished."
