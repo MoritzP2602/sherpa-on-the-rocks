@@ -16,6 +16,16 @@ exec >"$OUTFILE" 2>"$ERRFILE"
 LOGDIR=$(realpath "$LOGDIR")
 STATUS_LOG="$LOGDIR/overview.${CLUSTER}.log"
 
+get_last_event_count() {
+  local last_event
+  last_event=$(grep -Eo 'Event[[:space:]]+[0-9]+' "$OUTFILE" | awk '{print $2}' | tail -n 1)
+  if [ -n "$last_event" ]; then
+    echo "$last_event"
+  else
+    echo "unknown"
+  fi
+}
+
 cleanup() {
   echo ""
   if [ -f "$TMPDIR/Analysis.yoda.gz" ] && [ -d "$OUTDIR" ]; then
@@ -125,7 +135,7 @@ else
 fi
 
 TIMEOUT=$((WALL_TIME_LIMIT - 120))
-echo "Job runs in the -- $QUEUE_NAME -- with a wall time limit of $WALL_TIME_LIMIT seconds."
+echo "Job runs in the -- $QUEUE_NAME -- with a wall time limit of $WALL_TIME_LIMIT seconds [i.e. min(1.5 x $MAXRUNTIME, $QUEUE_LIMIT)]."
 echo "SHERPA will be terminated after $TIMEOUT seconds (2 minutes before wall time limit)!"
 echo ""
 
@@ -141,14 +151,15 @@ cd "$TMPDIR"
 
 timeout -s TERM "$TIMEOUT" "$SHERPA_INSTALLATION" -f "$YAML" -R "$SEED" || {
   exit_code=$?
-  if [ $exit_code -eq 124 ] || [ $exit_code -eq 137 ]; then
+  last_event=$(get_last_event_count)
+  if [ $exit_code -eq 124 ]; then
     echo ""
     echo "SHERPA was terminated after reaching the time limit of $TIMEOUT seconds!"
     echo "This prevents the job from exceeding the wall time limit."
     echo "Copying output files back to shared filesystem..."
     {
       flock -x 200
-      printf "[TIMEOUT] ${CLUSTER}.${PROCESS} | Hit wall time limit of $TIMEOUT seconds!\n" >> "$STATUS_LOG"
+      printf "[TIMEOUT] ${CLUSTER}.${PROCESS} | DIR: %s | EVENTS: %s | Hit wall time limit of %s seconds!\n" "$OUTDIR" "$last_event" "$TIMEOUT" >> "$STATUS_LOG"
     } 200>"$STATUS_LOG.lock"
     rm -f "$STATUS_LOG.lock"
     exit 0
@@ -157,7 +168,7 @@ timeout -s TERM "$TIMEOUT" "$SHERPA_INSTALLATION" -f "$YAML" -R "$SEED" || {
     echo "SHERPA failed with exit code $exit_code"
     {
       flock -x 200
-      printf "[FAILED] ${CLUSTER}.${PROCESS} | Exit code: $exit_code\n" >> "$STATUS_LOG"
+      printf "[FAILED] ${CLUSTER}.${PROCESS} | DIR: %s | EVENTS: %s | Exit code: %s\n" "$OUTDIR" "$last_event" "$exit_code" >> "$STATUS_LOG"
     } 200>"$STATUS_LOG.lock"
     rm -f "$STATUS_LOG.lock"
     exit $exit_code
@@ -184,6 +195,6 @@ seconds=$(( elapsed % 60 ))
 printf "Total elapsed time: %d-%02d:%02d:%02d\n" "$days" "$hours" "$minutes" "$seconds"
 {
   flock -x 200
-  printf "[COMPLETE] ${CLUSTER}.${PROCESS}\n" >> "$STATUS_LOG"
+  printf "[COMPLETE] ${CLUSTER}.${PROCESS} | DIR: %s \n" "$OUTDIR" >> "$STATUS_LOG"
 } 200>"$STATUS_LOG.lock"
 rm -f "$STATUS_LOG.lock"
