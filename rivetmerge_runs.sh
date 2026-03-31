@@ -63,6 +63,11 @@ if [ ${#FOLDERS[@]} -eq 0 ]; then
     exit 1
 fi
 
+if [ -n "$OUTPUT_DIR" ] && [ ${#FOLDERS[@]} -ne 1 ]; then
+    echo "Error: --output|-o can only be used with exactly one input folder."
+    exit 1
+fi
+
 merge_dir() {
     dir="$1"
     YODA=$(basename "$dir")
@@ -180,16 +185,20 @@ merge_chunked() {
     if command -v rivet-merge >/dev/null 2>&1; then
         local total_files=${#files[@]}
         local num_chunks=$(( (total_files + CHUNK_SIZE - 1) / CHUNK_SIZE ))
+        local chunk_parallel="$NPROC"
+        if [ "$num_chunks" -lt "$chunk_parallel" ]; then
+            chunk_parallel="$num_chunks"
+        fi
         
         echo "Total files: $total_files, Chunk size: $CHUNK_SIZE, Number of chunks: $num_chunks, Parallel jobs: $NPROC"
 
-        local temp_dir="$dir/.rivet-merge_tmp_$$"
+        local temp_dir="$dir/.rivet-merge_tmp"
         mkdir -p "$temp_dir"
         
         trap "rm -rf '$temp_dir'" EXIT INT TERM
         local chunk_num=0
         
-        echo "Processing chunks in parallel batches of $NPROC..."
+        echo "Processing chunks in parallel batches of $chunk_parallel..."
         for ((i=0; i<total_files; i+=CHUNK_SIZE)); do
             local chunk_files=("${files[@]:i:CHUNK_SIZE}")
             local temp_file="$temp_dir/chunk_${chunk_num}.yoda"
@@ -200,7 +209,7 @@ merge_chunked() {
             
             chunk_num=$((chunk_num + 1))
             
-            if (( chunk_num % NPROC == 0 )); then
+            if (( chunk_num % chunk_parallel == 0 )); then
                 echo "Waiting for batch to complete..."
                 wait
             fi
@@ -289,14 +298,6 @@ if [ "$TOTAL_DIRS" -eq 0 ]; then
     exit 0
 fi
 
-if [ "$NPROC_USER_SET" = false ]; then
-    if [ "$TOTAL_DIRS" -lt 4 ]; then
-        NPROC="$TOTAL_DIRS"
-    else
-        NPROC=4
-    fi
-fi
-
 if [ "$CHUNK_SIZE" -gt 0 ]; then
     CHUNKED_DISPLAY="enabled (size: $CHUNK_SIZE)"
 else
@@ -337,7 +338,7 @@ if [ ${#ALL_NESTED_DIRS[@]} -gt 0 ]; then
     if [ ${#ALL_NESTED_DIRS[@]} -lt "$NESTED_NPROC" ]; then
         NESTED_NPROC=${#ALL_NESTED_DIRS[@]}
     fi
-    echo "Processing ${#ALL_NESTED_DIRS[@]} nested directories with $NESTED_NPROC parallel jobs..."
+    echo "Processing ${#ALL_NESTED_DIRS[@]} nested directories..."
     printf "%s\n" "${ALL_NESTED_DIRS[@]}" | xargs -n 1 -P "$NESTED_NPROC" bash -c 'merge_dir "$0"'
 fi
 
@@ -346,7 +347,7 @@ if [ ${#ALL_FLAT_DIRS[@]} -gt 0 ]; then
     if [ ${#ALL_FLAT_DIRS[@]} -lt "$FLAT_NPROC" ]; then
         FLAT_NPROC=${#ALL_FLAT_DIRS[@]}
     fi
-    echo "Processing ${#ALL_FLAT_DIRS[@]} flat directories with $FLAT_NPROC parallel jobs..."
+    echo "Processing ${#ALL_FLAT_DIRS[@]} flat directories..."
     printf "%s\n" "${ALL_FLAT_DIRS[@]}" | xargs -n 1 -P "$FLAT_NPROC" bash -c 'merge_flat "$0"'
 fi
 
