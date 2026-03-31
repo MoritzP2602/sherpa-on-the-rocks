@@ -31,7 +31,6 @@ def main(paths):
             base_path = os.path.dirname(first_file_dir)
         else:
             base_path = os.getcwd()
-
     base_path =  base_path.split("/")[-1]
     
     total_files = len(files)
@@ -40,11 +39,13 @@ def main(paths):
         
         with open(filepath, encoding='utf-8', errors='replace') as f:
             content = f.read()
+            
         # Extract YAML path
         yaml_match = re.search(r'YAML\s*:\s*(.*\.yaml)', content)
         if not yaml_match:
             continue
         yaml_path = yaml_match.group(1).strip()
+
         # Extract number of events
         events_match = re.search(r'Generated events:\s*(\d+)', content)
         if not events_match:
@@ -63,7 +64,6 @@ def main(paths):
             time_no_init_per_1M = (time_no_init / events) * 1e6 / 3600.0
             yaml_stats[yaml_path]['run_times_no_init_per_1M'].append(time_no_init_per_1M)
             continue
-            
         events = int(events_match.group(1))
         
         # Extract elapsed time (with initialization)
@@ -84,7 +84,6 @@ def main(paths):
             yaml_stats[yaml_path]['events_no_init'] += events
             time_no_init_per_1M = (time_no_init / events) * 1e6 / 3600.0
             yaml_stats[yaml_path]['run_times_no_init_per_1M'].append(time_no_init_per_1M)
-
         yaml_stats[yaml_path]['events'] += events
         yaml_stats[yaml_path]['runs'] += 1
 
