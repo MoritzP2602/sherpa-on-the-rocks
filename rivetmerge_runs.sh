@@ -334,18 +334,26 @@ echo "  output dir     : $OUTPUT_DIR_DISPLAY"
 echo ""
 
 if [ ${#ALL_NESTED_DIRS[@]} -gt 0 ]; then
-    NESTED_NPROC="$NPROC"
-    if [ ${#ALL_NESTED_DIRS[@]} -lt "$NESTED_NPROC" ]; then
-        NESTED_NPROC=${#ALL_NESTED_DIRS[@]}
+    if [ "$CHUNK_SIZE" -gt 0 ]; then
+        NESTED_NPROC=1
+    else
+        NESTED_NPROC="$NPROC"
+        if [ ${#ALL_NESTED_DIRS[@]} -lt "$NESTED_NPROC" ]; then
+            NESTED_NPROC=${#ALL_NESTED_DIRS[@]}
+        fi
     fi
     echo "Processing ${#ALL_NESTED_DIRS[@]} nested directories..."
     printf "%s\n" "${ALL_NESTED_DIRS[@]}" | xargs -n 1 -P "$NESTED_NPROC" bash -c 'merge_dir "$0"'
 fi
 
 if [ ${#ALL_FLAT_DIRS[@]} -gt 0 ]; then
-    FLAT_NPROC="$NPROC"
-    if [ ${#ALL_FLAT_DIRS[@]} -lt "$FLAT_NPROC" ]; then
-        FLAT_NPROC=${#ALL_FLAT_DIRS[@]}
+    if [ "$CHUNK_SIZE" -gt 0 ]; then
+        FLAT_NPROC=1
+    else
+        FLAT_NPROC="$NPROC"
+        if [ ${#ALL_FLAT_DIRS[@]} -lt "$FLAT_NPROC" ]; then
+            FLAT_NPROC=${#ALL_FLAT_DIRS[@]}
+        fi
     fi
     echo "Processing ${#ALL_FLAT_DIRS[@]} flat directories..."
     printf "%s\n" "${ALL_FLAT_DIRS[@]}" | xargs -n 1 -P "$FLAT_NPROC" bash -c 'merge_flat "$0"'
