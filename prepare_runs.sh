@@ -168,8 +168,8 @@ process_folder() {
                     echo "Listed $listed_in_dir subdirectories of $dir"
                 fi
             else
-                if [ "$prefix_has_yaml" = false ]; then
-                    echo "Skipping $dir (no .yaml file found in $PREFIX)"
+                if [ "$prefix_has_yaml" = false ] && ! has_yaml_file "$dir"; then
+                    echo "Skipping $dir (no .yaml file found in $PREFIX or $dir)"
                     continue
                 fi
 
