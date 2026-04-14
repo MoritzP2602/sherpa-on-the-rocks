@@ -1,0 +1,22 @@
+[2026-04-14 16:51:54] [Phase 9] Running: bash -lc cd '/home/moritz.pabst/MASTER/Drell-Yan' && app-tools-compute_chi2 validation --weights '/home/moritz.pabst/MASTER/Drell-Yan/weights.txt' --depth 1
+Starting chi2 computation...
+
+Processing 1/2 files...                                                  Processing 2/2 files...                                                  ┌───────────────────┬───────────────┬───────┬────────────────┬────────────────┐
+│ Label             │   Global chi2 │   ndf │   Reduced chi2 │   Average chi2 │
+├───────────────────┼───────────────┼───────┼────────────────┼────────────────┤
+│ tune.1_0.dir1     │    226173.159 │  2470 │         91.568 │         66.605 │
+│ tune.err.1_0.dir1 │    290024.817 │  2447 │        118.523 │         91.613 │
+└───────────────────┴───────────────┴───────┴────────────────┴────────────────┘
+
+Min. reduced chi2: 91.57 (label: tune.1_0.dir1, source: validation/tune.1_0.dir1/tune.1_0.dir1.yoda)
+Min. average chi2: 66.61 (label: tune.1_0.dir1, source: validation/tune.1_0.dir1/tune.1_0.dir1.yoda)
+
+Wrote chi2 JSON to chi2.json.
+[2026-04-14 16:51:56] [Phase 9] Running: bash -lc cd '/home/moritz.pabst/MASTER/Drell-Yan' && app-tools-plot_chi2 chi2.json
+Starting chi2 plotting...
+
+Created plot for ATLAS_2014_I1315949: chi2-plots/ATLAS_2014_I1315949_chi2_plot.pdf/png
+Created plot for CMS_2012_I1107658: chi2-plots/CMS_2012_I1107658_chi2_plot.pdf/png
+
+Created chi2-plots/index.html
+[2026-04-14 16:52:11] [Phase 9] Wrote summary to /home/moritz.pabst/MASTER/Drell-Yan/master/summary.txt

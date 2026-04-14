@@ -1,0 +1,31 @@
+000 (38612895.000.000) 2026-04-14 16:50:50 Job submitted from host: <10.255.1.98:22107?addrs=10.255.1.98-22107&alias=rocks9.local>
+    DAG Node: P8_D1
+...
+001 (38612895.000.000) 2026-04-14 16:51:15 Job executing on host: <10.255.255.100:44925?addrs=10.255.255.100-44925&alias=compute-21-14.local>
+	SlotName: slot1_53@compute-21-14.local
+	CondorScratchDir = "/scratch/condor/execute/dir_327928"
+	Cpus = 8
+	Disk = 3072
+	GPUs = 0
+	Memory = 128
+...
+006 (38612895.000.000) 2026-04-14 16:51:20 Image size of job updated: 1500
+	0  -  MemoryUsage of job (MB)
+	0  -  ResidentSetSize of job (KB)
+...
+005 (38612895.000.000) 2026-04-14 16:51:20 Job terminated.
+	(1) Normal termination (return value 0)
+		Usr 0 00:00:03, Sys 0 00:00:00  -  Run Remote Usage
+		Usr 0 00:00:00, Sys 0 00:00:00  -  Run Local Usage
+		Usr 0 00:00:03, Sys 0 00:00:00  -  Total Remote Usage
+		Usr 0 00:00:00, Sys 0 00:00:00  -  Total Local Usage
+	0  -  Run Bytes Sent By Job
+	0  -  Run Bytes Received By Job
+	0  -  Total Bytes Sent By Job
+	0  -  Total Bytes Received By Job
+	Partitionable Resources :    Usage  Request Allocated 
+	   Cpus                 :        0        8         8 
+	   Disk (KB)            :     1500     1500      3072 
+	   GPUs                 :                           0 
+	   Memory (MB)          :        0        2       128 
+...

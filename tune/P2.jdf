@@ -1,0 +1,9 @@
+Executable     = /bin/bash
+arguments      = $(JOB_DIR)/run_P2.sh $(STATE_JSON) $(DIR_INDEX) $(Cluster) $(Process) $(PHASE_LOG_DIR) $(folder) $(RUN_DIR) $(MAXRUNTIME) $(PHASE_KEY)
++MaxRuntime    = $(MAXRUNTIME)
+request_cpus   = 1
+max_idle       = 1000
+
+Log            = $(PHASE_LOG_DIR)/job.$(Cluster).$(Process).log
+
+Queue folder from $(RUNS_FILE)

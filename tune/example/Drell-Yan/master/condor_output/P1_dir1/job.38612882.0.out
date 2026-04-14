@@ -1,0 +1,67 @@
+[2026-04-14 16:37:09] [Phase 1 | dir1] Running: app-tools-create_grid sample parameter.json template.yaml -n 10 --table --plots --outdir newscan --overwrite
+Starting grid generation...
+
+Run summary:
+  Mode: random
+  Parameter source: parameter-file: parameter.json
+  Number of points: 10
+Created outputs:
+  - newscan/
+  - newscan.grid.dat
+  - newscan.grid.plots/
+
+[2026-04-14 16:37:26] [Phase 1 | dir1] Running: bash /home/moritz.pabst/sherpa-on-the-rocks/prepare_runs.sh newscan 5
+Creating 5 subdirectories for targets at depth 1 in newscan...
+Created: newscan/00/00
+Created: newscan/00/01
+Created: newscan/00/02
+Created: newscan/00/03
+Created: newscan/00/04
+Created: newscan/01/00
+Created: newscan/01/01
+Created: newscan/01/02
+Created: newscan/01/03
+Created: newscan/01/04
+Created: newscan/02/00
+Created: newscan/02/01
+Created: newscan/02/02
+Created: newscan/02/03
+Created: newscan/02/04
+Created: newscan/03/00
+Created: newscan/03/01
+Created: newscan/03/02
+Created: newscan/03/03
+Created: newscan/03/04
+Created: newscan/04/00
+Created: newscan/04/01
+Created: newscan/04/02
+Created: newscan/04/03
+Created: newscan/04/04
+Created: newscan/05/00
+Created: newscan/05/01
+Created: newscan/05/02
+Created: newscan/05/03
+Created: newscan/05/04
+Created: newscan/06/00
+Created: newscan/06/01
+Created: newscan/06/02
+Created: newscan/06/03
+Created: newscan/06/04
+Created: newscan/07/00
+Created: newscan/07/01
+Created: newscan/07/02
+Created: newscan/07/03
+Created: newscan/07/04
+Created: newscan/08/00
+Created: newscan/08/01
+Created: newscan/08/02
+Created: newscan/08/03
+Created: newscan/08/04
+Created: newscan/09/00
+Created: newscan/09/01
+Created: newscan/09/02
+Created: newscan/09/03
+Created: newscan/09/04
+Done! Results written to runs.txt.
+Total number of runs: 50
+[2026-04-14 16:37:31] [Phase 1 | dir1] Completed successfully.

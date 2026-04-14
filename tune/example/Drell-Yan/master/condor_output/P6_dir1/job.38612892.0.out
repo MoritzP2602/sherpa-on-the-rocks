@@ -1,0 +1,21 @@
+[2026-04-14 16:47:11] [Phase 6 | dir1] Running: app-tools-create_grid tune . template.yaml --outdir validation
+Starting grid generation...
+
+Run summary:
+  Mode: tune
+  Parameter source: existing directory: .
+Created outputs:
+  - validation/
+
+[2026-04-14 16:47:13] [Phase 6 | dir1] Running: bash /home/moritz.pabst/sherpa-on-the-rocks/prepare_runs.sh validation 3
+Creating 3 subdirectories for targets at depth 1 in validation...
+Created: validation/tune.1_0.dir1/00
+Created: validation/tune.1_0.dir1/01
+Created: validation/tune.1_0.dir1/02
+Created: validation/tune.err.1_0.dir1/00
+Created: validation/tune.err.1_0.dir1/01
+Created: validation/tune.err.1_0.dir1/02
+Done! Results written to runs.txt.
+Total number of runs: 6
+[2026-04-14 16:47:13] [Phase 6 | dir1] Validation setup done. Submission happens in Phase 7.
+[2026-04-14 16:47:13] [Phase 6 | dir1] Completed successfully.

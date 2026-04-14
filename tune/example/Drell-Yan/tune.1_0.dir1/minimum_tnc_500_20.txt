@@ -1,0 +1,12 @@
+# Objective value at best fit point: 2647059603.33 (2647059603.33 without weights)
+# Degrees of freedom: 973
+# phi2/ndf: 2720513.467
+# Minimisation took 13.27793550491333 seconds
+# Command line: /home/moritz.pabst/Programs/local/bin/app-tune2 weights.txt data.json app_1_0.json -s 500 -r 20 -p -o tune.1_0.dir1
+# Best fit point:#
+# PNAME           	 PVALUE            #    COMMENT    [  PLOW      ...   PHIGH    ]
+#
+MATTER_FRACTION_1	0.3401018          # ONBOUND       [ 0.3401018  ...  0.6055132 ]
+MATTER_RADIUS_1  	0.8559596429009357 #               [ 0.780194   ...  0.9416053 ]
+PT_Min           	2.222986           # ONBOUND       [ 2.222986   ...  2.734642  ]
+SIGMA_ND_NORM    	0.8694788804080436 #               [ 0.808082   ...  1.129873  ]

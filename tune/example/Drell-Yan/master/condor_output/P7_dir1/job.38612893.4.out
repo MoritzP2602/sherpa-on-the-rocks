@@ -1,0 +1,341 @@
+Job 38612893.4 started on compute-13-13
+
+SHERPA_BINARY       : /home/moritz.pabst/Programs/sherpa-ue/install/bin/Sherpa
+INTEGRATION_RESULTS : /home/moritz.pabst/MASTER/Drell-Yan/init
+YAML                : /home/moritz.pabst/MASTER/Drell-Yan/validation/tune.err.1_0.dir1/template.yaml
+YODA                : 01.yoda.gz
+OUTDIR              : /home/moritz.pabst/MASTER/Drell-Yan/validation/tune.err.1_0.dir1/01
+PHASE_LOG_DIR              : /home/moritz.pabst/MASTER/Drell-Yan/master/condor_output/P7_dir1
+SEED                : 3822978660
+MAXRUNTIME          : 600 seconds
+
+SHERPA will be terminated after 780 seconds.
+
+Welcome to Sherpa, Moritz Pabst on compute-13-13.
+Initialization of framework underway ...
+Local time: Tue Apr 14 16:47:46 2026
+Memory limit: 125.57 GB
+Seed: 3822978660
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [32m                   .[0m_                                                        │
+│ [32m                  .-[0m#.                                                       │
+│ [32m                 .--[0m+@.     .                                                │
+│ [32m                .----[0m@@.[31m   +[0m#-                                               │
+│ [32m               .-----[0m+@@.[31m +**[0m@-         SHERPA v3.1.x (Erebus)               │
+│ [34m       :[0m-[32m     .-------[0m@@@[31m+***[0m#@-                                             │
+│ [34m      :=[0m#*[32m   .--------[0m+@[31m+*****[0m@@-       Monte Carlo event generator          │
+│ [34m     :===[0m@*[32m .----------[31m+******[0m#@@-                                           │
+│ [34m    :====[0m#@*[32m----------[31m+********[0m@@@-     https://sherpa-team.gitlab.io        │
+│ [34m   :======[0m@@*[32m--------[31m+*********[0m#@@@-                                         │
+│                                                                              │
+│          Authors:  Enrico Bothmann, Lois Flower, Christian Gutschow,         │
+│                    Stefan Hoeche, Mareen Hoppe, Joshua Isaacson,             │
+│                    Max Knobbe, Frank Krauss, Peter Meinzinger,               │
+│                    Davide Napoletano, Alan Price, Daniel Reichelt,           │
+│                    Marek Schoenherr, Steffen Schumann, Frank Siegert         │
+│   Former Authors:  Gurpreet Singh Chahal, Timo Fischer, Tanju Gleisberg,     │
+│                    Hendrik Hoeth, Johannes Krause, Silvan Kuttimalai,        │
+│                    Ralf Kuhn, Thomas Laubrich, Sebastian Liebschner,         │
+│                    Andreas Schaelicke, Holger Schulz, Jan Winter             │
+│                                                                              │
+│ Users are kindly asked to cite [1mJHEP 12 (2024) 156[0m.                           │
+│                                                                              │
+│ This program uses a lot of genuine and original research work by others.     │
+│ Users are encouraged to also cite the various original publications.         │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+[1m[33mWARNING[0m: You are using an unsupported development branch.
+Git branch: reweighting
+Revision: 6b5ebb15fa631523abef2856c977161e8ce76094.
+  -> AMISIC++/Perturbative has local modifications: 2dd0db2b62683d53320e4aab62e25a07
+Initializing hadron particle information ...
+Initializing beam spectra ...
+  Type: Collider Setup
+  Beam 1: P+ (enabled = 0, momentum = (3500,0,0,3500))
+  Beam 2: P+ (enabled = 0, momentum = (3500,0,0,-3500))
+Initializing PDFs ...
+  Hard scattering:    PDF4LHC21_40_pdfas + PDF4LHC21_40_pdfas
+  MPI:                PDF4LHC21_40_pdfas + PDF4LHC21_40_pdfas
+Fixed electroweak parameters
+  Input scheme: Gmu scheme, input: GF, m_W, m_Z, m_h, widths
+  Ren. scheme:  Gmu
+  Parameters:   sin^2(\theta_W) = 0.223043 - 0.00110541 i
+                vev             = 246.218
+Set \alpha according to EW scheme
+  1/\alpha(0)   = 137.036
+  1/\alpha(def) = 132.119
+Particle data:
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│      Name  Kf-code          Mass         Width   Stable  Massive   Active        Yukawa │
+├─────────────────────────────────────────────────────────────────────────────────────────┤
+│         d        1          0.01             0        1        0        1             0 │
+│         u        2         0.005             0        1        0        1             0 │
+│         s        3           0.2             0        1        0        1             0 │
+│         c        4          1.42             0        1        0        1             0 │
+│         b        5          4.92             0        1        0        1             0 │
+│         t        6         172.5          1.32        0        1        1         172.5 │
+│        e-       11      0.000511             0        1        0        1             0 │
+│        ve       12             0             0        1        0        1             0 │
+│       mu-       13         0.105             0        1        0        1             0 │
+│       vmu       14             0             0        1        0        1             0 │
+│      tau-       15         1.777   2.26735e-12        0        0        1             0 │
+│      vtau       16             0             0        1        0        1             0 │
+│         G       21             0             0        1        0        1             0 │
+│         P       22             0             0        1        0        1             0 │
+│         Z       23       91.1876        2.4952        0        1        1       91.1876 │
+│        W+       24        80.379         2.085        0        1        1        80.379 │
+│        h0       25        125.09        0.0041        0        1        1        125.09 │
+│ Instanton      999             0             0        0        0        1             0 │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+Particle containers:
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│      Name  Kf-code  Constituents                                                        │
+├─────────────────────────────────────────────────────────────────────────────────────────┤
+│         l       90  e-, e+, mu-, mu+, tau-, tau+                                        │
+│         v       91  ve, veb, vmu, vmub, vtau, vtaub                                     │
+│         f       92  d, db, u, ub, s, sb, c, cb, b, bb, e-, e+, mu-, mu+,                │
+│                     tau-, tau+, ve, veb, vmu, vmub, vtau, vtaub                         │
+│         j       93  d, db, u, ub, s, sb, c, cb, b, bb, G                                │
+│         Q       94  d, db, u, ub, s, sb, c, cb, b, bb                                   │
+│       ewj       98  d, db, u, ub, s, sb, c, cb, b, bb, G, P                             │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+Reading in parameters for P+ yields:
+   Primordial k_T Form   = Gauss_Limited
+   Primordial k_T Recoil = Beam_vs_Shower
+   Matter Form           = Double_Gaussian
+   BEAM_SPECTATOR_KTEXPO = 5
+   BEAM_SPECTATOR_KTMAX = 1
+   BEAM_SPECTATOR_MEAN = 0
+   BEAM_SPECTATOR_Q2 = 0.77
+   BEAM_SPECTATOR_SIGMA = 0.25
+   ENERGY_SCALING_EXPO = 0.08
+   MATTER_FRACTION_1 = 0.463
+   MATTER_RADIUS_1 = 0.871
+   MATTER_RADIUS_2 = 1
+   REFERENCE_ENERGY = 7000
+   SHOWER_INITIATOR_KTEXPO = 5.12
+   SHOWER_INITIATOR_KTMAX = 2.7
+   SHOWER_INITIATOR_MEAN = 1
+   SHOWER_INITIATOR_Q2 = 0.77
+   SHOWER_INITIATOR_SIGMA = 1.1
+
+Form_Factor::Initialise(P+): R = 4.41399 1/GeV = 0.871 fm, expo = 0.
+Form_Factor::Initialise(P+): R = 4.41399 1/GeV = 0.871 fm, expo = 0.
+Initializing primordial transverse momentum ...
+Initializing remnants ...
+  Hard process: P+ (Hadron) + P+ (Hadron)
+Initializing showers ...
+Initializing matrix elements for the hard processes ...
+ME_Generators::ME_Generators(): Try loading 'OpenLoops' from 'libSherpaOpenLoops'.
+Initializing Comix ...
+Massive PS flavours for Comix: (c,cb,b,bb,e-,e+,mu-,mu+,tau-,tau+)
+Massive PS flavours for Amegic: (c,cb,b,bb,e-,e+,mu-,mu+,tau-,tau+)
+Initialising OpenLoops generator from /home/moritz.pabst/Programs/OpenLoops-2.1.4/.
+####################################################################
+#        ___  ___  ____  _  _       __   __  ___   __    ___       #
+#       /   \ |__| |__   |\ |  |   /  \ /  \ |__| /__    __/       #
+#       \___/ |    |___  | \|  |__ \__/ \__/ |    __/   /__        #
+#       You are using OpenLoops 2 to evaluate loop amplitudes      #
+#        F. Buccioni, J.-N. Lang, J. Lindert, P. Maierhoefer,      #
+#               S. Pozzorini, M. Zoller, H. Zhang                  #
+#               Eur.Phys.J. C79 (2019) no.10, 866                  #
+#                        arXiv:1907.13071                          #
+####################################################################
+Building processes (3 ME generators, 2 process blocks) ...
+Setting up processes .............................................................. done (73 MB, 0s/0s)
+Performing tests ........................ done (73 MB, 0s/0s)
+Initializing scales done (73 MB, 0s/0s)
+Initializing the beam remnants ...
+   =============================================================================
+   | Amisic::Initialize                                                        |
+   | Fixed centre-of mass energies for hadron-hadron collisions.               |
+   =============================================================================
+
+   -----------------------------------------------------------------------------
+   | Matter_Overlap:                                                           |
+   | Integral up to b_max = 6.24512  fm yields 1       .                       |
+   | Double_Gaussian     , R_1 = 0.871  fm, f_1 = 0.463 , R_2 = 1      fm      |
+   | Double_Gaussian     , R_1 = 0.871  fm, f_1 = 0.463 , R_2 = 1      fm      |
+   -----------------------------------------------------------------------------
+
+Massive PS flavours for Amisic: (c,cb,b,bb,e-,e+,mu-,mu+,tau-,tau+)
+   -------------------------------------------------------------------------------------
+   | MI_Integrator::operator: xs integration did not converge after 2000000            |
+   |    trials. Target accuracy: uncert/xs_pert = 0.05%.                               |
+   | MI_Processes::TotalCrossSection: xs_pert = 81.13      mb +- 0.101%.               |
+   | MI_Integrator::operator: xs integration did not converge after 2000000            |
+   |    trials. Target accuracy: uncert/xs_pert = 0.05%.                               |
+   |                           v0   : xs_pert = 81.15      mb +- 0.1 %.               |
+   -------------------------------------------------------------------------------------
+   | Hadronic_XSec_Calculator::OutputXSratios: hadronic cross sections (all in mb)     |
+   | E_cms [GeV] | sigma_tot   | sigma_el    |sigma_SDA    | sigma_SDB   | sigma_DD    |
+   | 7000        | 90.7646     | 19.3527     | 6.85004     | 6.85004     | 9.25827     |
+   -------------------------------------------------------------------------------------
+   | E_cms [GeV] | sigma_tot   | sigma_hd    | sigma_ND    | ratio       |             |
+   | 7000        | 90.7646     | 81.1267     | 46.37       | 1.74955     |             |
+   -------------------------------------------------------------------------------------
+
+   -----------------------------------------------------------------------------
+   | Initializing the Interaction Probability: fixing K's                      |
+   | E = 7000    : xs_ND = 119.087     , ratio = 1.74955      -> k = 0.508178  |
+   |       v0    : xs_ND = 119.087     , ratio = 1.75         -> k = 0.508102  |
+   -----------------------------------------------------------------------------
+   -----------------------------------------------------------------------------
+   | Interaction_Probability::OutputTables look-up tables and values:          |
+   | E_{c.m.} [GeV]  | b [fm] | xs_hard/xs_ND  | k            | b*dP_int(b)    |
+   | 7000            |        | 1.74955        | 0.508178     |                |
+   |                 | 0      | 0              |              | 0              |
+   |                 | 0.156  | 3.06187        |              | 0.787484       |
+   |                 | 0.312  | 2.58306        |              | 1.56519        |
+   |                 | 0.468  | 2.02247        |              | 2.30467        |
+   |                 | 0.625  | 1.43613        |              | 2.90832        |
+   |                 | 0.781  | 0.849781       |              | 3.06157        |
+   |                 | 0.937  | 0.675181       |              | 3.29039        |
+   |                 | 1.09   | 0.511808       |              | 3.27641        |
+   |                 | 1.25   | 0.348434       |              | 2.8891         |
+   |                 | 1.41   | 0.185061       |              | 1.96955        |
+   |                 | 1.56   | 0.0216872      |              | 0.294585       |
+   |                 | 1.72   | 0.0143759      |              | 0.216172       |
+   |                 | 1.87   | 0.0127848      |              | 0.210014       |
+   |                 | 2.03   | 0.0111937      |              | 0.199478       |
+   |                 | 2.19   | 0.00960267     |              | 0.184543       |
+   |                 | 2.34   | 0.00801159     |              | 0.165193       |
+   |                 | 2.5    | 0.00642052     |              | 0.141408       |
+   |                 | 2.65   | 0.00482944     |              | 0.113171       |
+   |                 | 2.81   | 0.00323836     |              | 0.0804618      |
+   |                 | 2.97   | 0.00164729     |              | 0.0432632      |
+   -----------------------------------------------------------------------------
+   | hard cross section with and without overlap:                              |
+   | xs_hard = 0      mb  (without overlap) vs. 0      (with overlap) mb.      |
+   -----------------------------------------------------------------------------
+
+   -----------------------------------------------------------------------------
+   | Fixed (energy-dependent) maxima for quick'n'dirty Sudakov evaluation      |
+   | Energy [GeV]       | Maximum                                              |
+   | 7000               | 383.28519                                            |
+   -----------------------------------------------------------------------------
+
+MI_Handler::MI_Handler(id = 2, name = Amisic, gen = Amisic)
+Underlying event/multiple interactions initialized
+    MI[2]: on = 1 (type = Amisic, Amisic)
+Soft-collision handlers:
+  Type[2]: None
+Initialized fragmentation
+Initialized hadron decays (model = HADRONS++)
+Initialized soft photons
+Initialized on-the-fly reweighting
+Read in channels from directory: Results/Amegic/MC_2_2__j__j__mu-__mu+__QCD(BVI)
+Calculating xs for '2_2__j__j__mu-__mu+__QCD(BVI)' (Amegic+OpenLoops) ...
+[1m2_2__j__j__mu-__mu+__QCD(BVI)[0m : [34m[1m970.5026 pb[0m +- ( [31m1.080692 pb = 0.11135385 %[0m ) [1m exp. eff: [31m13.661083 %[0m
+Read in channels from directory: Results/Comix/MC_2_3__j__j__mu-__mu+__j__QCD(RS)
+Calculating xs for '2_3__j__j__mu-__mu+__j__QCD(RS)' (Comix) ...
+[1m2_3__j__j__mu-__mu+__j__QCD(RS)[0m : [34m[1m8.8782453 pb[0m +- ( [31m0.20617898 pb = 2.3222943 %[0m ) [1m exp. eff: [31m0.11610881 %[0m
+  reduce max for 2_2__j__j__mu-__mu+__QCD(BVI) to 0.61876737 ( eps = 0.001 -> exp. eff 0.22077899 ) 
+  reduce max for 2_3__j__j__mu-__mu+__j__QCD(RS) to 0.42656525 ( eps = 0.001 -> exp. eff 0.0027219473 ) 
+Read in channels from directory: Results/Amegic/MC_2_2__j__j__e-__e+__QCD(BVI)
+Calculating xs for '2_2__j__j__e-__e+__QCD(BVI)' (Amegic+OpenLoops) ...
+[1m2_2__j__j__e-__e+__QCD(BVI)[0m : [34m[1m970.73116 pb[0m +- ( [31m1.0263327 pb = 0.1057278 %[0m ) [1m exp. eff: [31m13.453725 %[0m
+Read in channels from directory: Results/Comix/MC_2_3__j__j__e-__e+__j__QCD(RS)
+Calculating xs for '2_3__j__j__e-__e+__j__QCD(RS)' (Comix) ...
+[1m2_3__j__j__e-__e+__j__QCD(RS)[0m : [34m[1m8.5068307 pb[0m +- ( [31m0.19468963 pb = 2.2886271 %[0m ) [1m exp. eff: [31m0.15296583 %[0m
+  reduce max for 2_2__j__j__e-__e+__QCD(BVI) to 0.58113613 ( eps = 0.001 -> exp. eff 0.23150728 ) 
+  reduce max for 2_3__j__j__e-__e+__j__QCD(RS) to 0.53685614 ( eps = 0.001 -> exp. eff 0.002849289 ) 
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [1m[32mSHERPA generates events with the following structure:[0m                        │
+│ Event generation          Weighted                                           │
+│ Perturbative              Signal_Processes                                   │
+│ Perturbative              Minimum_Bias: None                                 │
+│ Perturbative              Hard_Decays                                        │
+│ Perturbative              Jet_Evolution:CSS                                  │
+│ Perturbative              Lepton_FS_QED_Corrections:Photons                  │
+│ Perturbative              Multiple_Interactions: Amisic                      │
+│ Hadronization             Beam_Remnants:Parametrised                         │
+│ Hadronization             Hadronization: Ahadic                              │
+│ Hadronization             Hadron_Decays                                      │
+│ Userhook                  None                                               │
+│ Analysis                  Rivet                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+  Event 1 ( 1s elapsed / 1h 4m 38s left ) -> ETA: Tue Apr 14 17:53  XS = 5292.9814 pb +- ( 5292.9814 pb = 100 % )  
+  Event 2 ( 1s elapsed / 32m 48s left ) -> ETA: Tue Apr 14 17:21  XS = 4926.2627 pb +- ( 366.71867 pb = 7 % )  
+  Event 3 ( 1s elapsed / 22m 4s left ) -> ETA: Tue Apr 14 17:10  XS = 4355.6173 pb +- ( 608.65723 pb = 13 % )  
+  Event 4 ( 2s elapsed / 16m 42s left ) -> ETA: Tue Apr 14 17:05  XS = 3255.8983 pb +- ( 1180.9376 pb = 36 % )  
+  Event 5 ( 2s elapsed / 13m 25s left ) -> ETA: Tue Apr 14 17:02  XS = 2620.2117 pb +- ( 1113.9415 pb = 42 % )  
+  Event 6 ( 2s elapsed / 11m 14s left ) -> ETA: Tue Apr 14 16:59  XS = 2723.7944 pb +- ( 915.40875 pb = 33 % )  
+  Event 7 ( 2s elapsed / 9m 46s left ) -> ETA: Tue Apr 14 16:58  XS = 2755.3266 pb +- ( 774.30391 pb = 28 % )  
+  Event 8 ( 2s elapsed / 8m 32s left ) -> ETA: Tue Apr 14 16:57  XS = 2415.2379 pb +- ( 751.8778 pb = 31 % )  
+  Event 9 ( 2s elapsed / 7m 37s left ) -> ETA: Tue Apr 14 16:56  XS = 2148.631 pb +- ( 714.68367 pb = 33 % )  
+  Event 10 ( 2s elapsed / 6m 55s left ) -> ETA: Tue Apr 14 16:55  XS = 2170.873 pb +- ( 654.45788 pb = 30 % )  
+  Event 20 ( 2s elapsed / 3m 38s left ) -> ETA: Tue Apr 14 16:52  XS = 2254.6381 pb +- ( 441.3988 pb = 19 % )  
+  Event 30 ( 2s elapsed / 2m 34s left ) -> ETA: Tue Apr 14 16:51  XS = 2157.0408 pb +- ( 352.03014 pb = 16 % )  
+  Event 40 ( 2s elapsed / 2m 1s left ) -> ETA: Tue Apr 14 16:50  XS = 2350.9196 pb +- ( 337.24539 pb = 14 % )  
+  Event 50 ( 2s elapsed / 1m 41s left ) -> ETA: Tue Apr 14 16:50  XS = 2173.6115 pb +- ( 355.85771 pb = 16 % )  
+  Event 60 ( 2s elapsed / 1m 27s left ) -> ETA: Tue Apr 14 16:50  XS = 2034.1554 pb +- ( 316.79091 pb = 15 % )  
+  Event 70 ( 2s elapsed / 1m 17s left ) -> ETA: Tue Apr 14 16:49  XS = 2065.9922 pb +- ( 286.43573 pb = 13 % )  
+  Event 80 ( 2s elapsed / 1m 11s left ) -> ETA: Tue Apr 14 16:49  XS = 2165.8349 pb +- ( 271.07113 pb = 12 % )  
+  Event 90 ( 3s elapsed / 1m 5s left ) -> ETA: Tue Apr 14 16:49  XS = 2264.6495 pb +- ( 252.1331 pb = 11 % )  
+  Event 100 ( 3s elapsed / 1m 1s left ) -> ETA: Tue Apr 14 16:49  XS = 2211.1516 pb +- ( 232.95667 pb = 10 % )  
+  Event 200 ( 4s elapsed / 41s left ) -> ETA: Tue Apr 14 16:49  XS = 2052.6195 pb +- ( 146.19724 pb = 7 % )  
+  Event 300 ( 6s elapsed / 34s left ) -> ETA: Tue Apr 14 16:49  XS = 2088.9739 pb +- ( 114.15726 pb = 5 % )  
+  Event 400 ( 7s elapsed / 30s left ) -> ETA: Tue Apr 14 16:49  XS = 2060.2859 pb +- ( 99.594211 pb = 4 % )  
+  Event 500 ( 8s elapsed / 26s left ) -> ETA: Tue Apr 14 16:49  XS = 1989.7638 pb +- ( 89.502182 pb = 4 % )  
+  Event 600 ( 10s elapsed / 24s left ) -> ETA: Tue Apr 14 16:49  XS = 1951.4271 pb +- ( 80.854857 pb = 4 % )  
+  Event 700 ( 11s elapsed / 22s left ) -> ETA: Tue Apr 14 16:49  XS = 1963.9024 pb +- ( 74.868533 pb = 3 % )  
+  Event 800 ( 13s elapsed / 19s left ) -> ETA: Tue Apr 14 16:49  XS = 2004.8124 pb +- ( 70.446776 pb = 3 % )  
+  Event 900 ( 14s elapsed / 17s left ) -> ETA: Tue Apr 14 16:49  XS = 1996.3453 pb +- ( 66.405253 pb = 3 % )  
+  Event 1000 ( 16s elapsed / 16s left ) -> ETA: Tue Apr 14 16:49  XS = 1989.7791 pb +- ( 62.637969 pb = 3 % )  
+  Event 2000 ( 31 s total ) = 5667431.9 evts/day                    
+Summarizing the run may take some time ...
+┌────────────────────────────────────────────────────────────────────────────┐
+│ Nominal or variation name     XS [pb]      RelDev  AbsErr [pb]      RelErr │
+├────────────────────────────────────────────────────────────────────────────┤
+│ [1mNominal                  [0m[34m[1m      1937.5[0m[33m         0 %[31m      46.1623      2.38 %[0m │
+│ [1mMPI+RECONNECTIONS.v0     [0m[34m[1m     1937.58[0m[33m         0 %[31m      46.1624      2.38 %[0m │
+└────────────────────────────────────────────────────────────────────────────┘
+Event generation statistics:
+  Generated events: 2000
+                                                            
+         *******************************************        
+         *              C O L L I E R              *        
+         *                                         *        
+         *        Complex One-Loop Library         *        
+         *      In Extended Regularizations        *        
+         *                                         *        
+         *    by A.Denner, S.Dittmaier, L.Hofer    *        
+         *                                         *        
+         *              version 1.2.8              *        
+         *                                         *        
+         *******************************************        
+                                                            
+########################################################################
+#                                                                      #
+#                        You are using OneLOop                         #
+#                                                                      #
+# for the evaluation of 1-loop scalar 1-, 2-, 3- and 4-point functions #
+#                                                                      #
+# author: Andreas van Hameren <hamerenREMOVETHIS@ifj.edu.pl>           #
+#   date: 2018-06-13                                                   #
+#                                                                      #
+# Please cite                                                          #
+#    A. van Hameren,                                                   #
+#      Comput.Phys.Commun. 182 (2011) 2427-2438, arXiv:1007.4716       #
+#    A. van Hameren, C.G. Papadopoulos and R. Pittau,                  #
+#      JHEP 0909:106,2009, arXiv:0903.4665                             #
+# in publications with results obtained with the help of this program. #
+#                                                                      #
+########################################################################
+  New events:
+    From "Jet_Evolution:CSS": 2 (5840) -> 0 %
+  Retried phases:
+    From "Hadron_Decay_Handler::RejectExclusiveChannelsFromFragmentation": 66 (0)
+  Retried methods:
+    From "Decay_Channel::GenerateKinematics": 7 (198870) -> 0 %
+Perturbative Interface (Matrix Elements):
+  momentum failures: 2
+[1m[33mWARNING[0m: You are using an unsupported development branch.
+┌──────────────────────────────────────────────────────────┐
+│ [1m[32mPlease cite the publications listed in 'References.tex'.[0m │
+└──────────────────────────────────────────────────────────┘
+Time: 1m 19s on Tue Apr 14 16:49:06 2026
+  (User: 1m 17s, System: 0s, Children User: 0s, Children System: 0s)
+
+Successfully copied Analysis.yoda.gz to /home/moritz.pabst/MASTER/Drell-Yan/validation/tune.err.1_0.dir1/01/01.yoda.gz

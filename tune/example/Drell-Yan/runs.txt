@@ -1,0 +1,6 @@
+validation/tune.1_0.dir1/00
+validation/tune.1_0.dir1/01
+validation/tune.1_0.dir1/02
+validation/tune.err.1_0.dir1/00
+validation/tune.err.1_0.dir1/01
+validation/tune.err.1_0.dir1/02

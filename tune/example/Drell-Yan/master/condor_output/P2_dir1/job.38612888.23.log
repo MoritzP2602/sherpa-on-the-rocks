@@ -1,0 +1,34 @@
+000 (38612888.023.000) 2026-04-14 16:38:20 Job submitted from host: <10.255.1.98:22107?addrs=10.255.1.98-22107&alias=rocks9.local>
+    DAG Node: P2_D1
+...
+001 (38612888.023.000) 2026-04-14 16:38:53 Job executing on host: <10.255.255.87:46185?addrs=10.255.255.87-46185&alias=compute-22-2.local>
+	SlotName: slot1_11@compute-22-2.local
+	CondorScratchDir = "/scratch/condor/execute/dir_2262326"
+	Cpus = 1
+	Disk = 9151
+	GPUs = 0
+	Memory = 128
+...
+006 (38612888.023.000) 2026-04-14 16:39:03 Image size of job updated: 41072
+	41  -  MemoryUsage of job (MB)
+	41072  -  ResidentSetSize of job (KB)
+...
+006 (38612888.023.000) 2026-04-14 16:40:59 Image size of job updated: 99412
+	41  -  MemoryUsage of job (MB)
+	41072  -  ResidentSetSize of job (KB)
+...
+004 (38612888.023.000) 2026-04-14 16:40:59 Job was evicted.
+	(0) CPU times
+		Usr 0 00:01:51, Sys 0 00:00:03  -  Run Remote Usage
+		Usr 0 00:00:00, Sys 0 00:00:00  -  Run Local Usage
+	0  -  Run Bytes Sent By Job
+	0  -  Run Bytes Received By Job
+	Partitionable Resources :    Usage  Request Allocated 
+	   Cpus                 :     0.09        1         1 
+	   Disk (KB)            :  1500        1500      9151 
+	   GPUs                 :                           0 
+	   Memory (MB)          :    41           2       128 
+...
+009 (38612888.023.000) 2026-04-14 16:40:59 Job was aborted.
+	Node Error: DAG node P2_D1 (38612888.42.0) failed with signal -1. (by user moritz.pabst)
+...

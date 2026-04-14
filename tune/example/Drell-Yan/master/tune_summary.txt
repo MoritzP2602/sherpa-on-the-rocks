@@ -1,0 +1,30 @@
+Tune Summary
+================================================================================
+DAGMan cluster ID: 38612881
+
+Condor cluster IDs per phase:
+  - P1_dir1: 38612882
+  - P2_dir1: 38612888
+  - P3_dir1: 38612889
+  - P4_dir1: 38612890
+  - P6_dir1: 38612892
+  - P7_dir1: 38612893
+  - P8_dir1: 38612895
+  - P9: 38612896
+  - dagman: 38612881
+
+Wall-clock time per phase:
+  - P1_dir1: start=2026-04-14T16:37:08 end=2026-04-14T16:37:31 duration=0:00:23
+  - P2_dir1: start=2026-04-14T16:39:11 end=2026-04-14T16:42:31 duration=0:03:20
+  - P3_dir1: start=2026-04-14T16:43:18 end=2026-04-14T16:43:23 duration=0:00:05
+  - P4_dir1: start=2026-04-14T16:43:54 end=2026-04-14T16:45:52 duration=0:01:58
+  - P6_dir1: start=2026-04-14T16:47:10 end=2026-04-14T16:47:13 duration=0:00:03
+  - P7_dir1: start=2026-04-14T16:47:48 end=2026-04-14T16:50:38 duration=0:02:50
+  - P8_dir1: start=2026-04-14T16:51:17 end=2026-04-14T16:51:20 duration=0:00:03
+  - P9: start=2026-04-14T16:51:53 end=n/a duration=n/a
+
+Input directories:
+  - /home/moritz.pabst/MASTER/Drell-Yan
+
+Condor output: /home/moritz.pabst/MASTER/Drell-Yan/master/condor_output
+State file: /home/moritz.pabst/MASTER/Drell-Yan/master/state.json
