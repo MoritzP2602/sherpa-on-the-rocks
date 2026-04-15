@@ -1,6 +1,5 @@
 #!/bin/bash
 set -euo pipefail
-log_msg "6" "$TAG" "Started."
 
 STATE_JSON="$1"
 DIR_INDEX="$2"
@@ -17,6 +16,7 @@ fi
 
 PHASE_KEY="P6_dir${DIR_INDEX}"
 TAG="dir${DIR_INDEX}"
+log_msg "6" "$TAG" "Started."
 
 record_phase_time "$STATE_JSON" "$PHASE_KEY" "start"
 if [[ -n "$CLUSTER" ]]; then
@@ -34,8 +34,7 @@ fi
 run_cmd "6" "$TAG" "${CREATE_VALIDATION_GRID_CMD[@]}"
 
 if [[ "$N_INPUT_DIRS" == "2" ]]; then
-  MERGED_SOURCE="$INPUT_DIR_1/merged"
-  MERGED_VALIDATION_GRID_CMD=(app-tools-create_grid tune "$MERGED_SOURCE" template.yaml --outdir validation)
+  MERGED_VALIDATION_GRID_CMD=(app-tools-create_grid tune "$MERGED_DIR" template.yaml --outdir validation)
   if [[ "${VALIDATION_REWEIGHT:-0}" == "1" ]]; then
     MERGED_VALIDATION_GRID_CMD+=(--nominal nominal.json)
   fi

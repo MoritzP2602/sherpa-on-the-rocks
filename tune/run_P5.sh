@@ -1,6 +1,5 @@
 #!/bin/bash
 set -euo pipefail
-log_msg "5" "$TAG" "Started."
 
 STATE_JSON="$1"
 CLUSTER="${2:-}"
@@ -16,6 +15,7 @@ fi
 
 PHASE_KEY="P5"
 TAG=""
+log_msg "5" "$TAG" "Started."
 
 record_phase_time "$STATE_JSON" "$PHASE_KEY" "start"
 if [[ -n "$CLUSTER" ]]; then
