@@ -26,11 +26,19 @@ load_global_state "$STATE_JSON"
 load_dir_state "$STATE_JSON" "$DIR_INDEX"
 cd "$INPUT_DIR"
 
-run_cmd "6" "$TAG" app-tools-create_grid tune "." template.yaml --outdir validation
+CREATE_VALIDATION_GRID_CMD=(app-tools-create_grid tune "." template.yaml --outdir validation)
+if [[ "${VALIDATION_REWEIGHT:-0}" == "1" ]]; then
+  CREATE_VALIDATION_GRID_CMD+=(--nominal nominal.json)
+fi
+run_cmd "6" "$TAG" "${CREATE_VALIDATION_GRID_CMD[@]}"
 
 if [[ "$N_INPUT_DIRS" == "2" ]]; then
   MERGED_SOURCE="$INPUT_DIR_1/merged"
-  run_cmd "6" "$TAG" app-tools-create_grid tune "$MERGED_SOURCE" template.yaml --outdir validation
+  MERGED_VALIDATION_GRID_CMD=(app-tools-create_grid tune "$MERGED_SOURCE" template.yaml --outdir validation)
+  if [[ "${VALIDATION_REWEIGHT:-0}" == "1" ]]; then
+    MERGED_VALIDATION_GRID_CMD+=(--nominal nominal.json)
+  fi
+  run_cmd "6" "$TAG" "${MERGED_VALIDATION_GRID_CMD[@]}"
 fi
 
 run_cmd "6" "$TAG" bash "$SHERPA_ON_THE_ROCKS_DIR/prepare_runs.sh" validation "$N_VAL_SUBRUNS"

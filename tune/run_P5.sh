@@ -63,8 +63,8 @@ ERR_JSON="$MERGED_DIR/err_${ORDER_SAFE}.json"
 MERGED_DATA="$MERGED_DIR/data.json"
 run_cmd "5" "$TAG" app-build "$SCAN1" "$SCAN2" --order "$ORDER" -o "$APP_JSON" -w "$MERGED_DIR/weights.txt"
 run_cmd "5" "$TAG" app-build "$SCAN1" "$SCAN2" --order "$ORDER" -o "$ERR_JSON" -w "$MERGED_DIR/weights.err.txt" --errs
-run_cmd "5" "$TAG" app-tune2 "$MERGED_DIR/weights.txt"     "$MERGED_DATA" "$APP_JSON" -s 500 -r 20 -p -o "$TUNE_MERGED"
-run_cmd "5" "$TAG" app-tune2 "$MERGED_DIR/weights.err.txt" "$MERGED_DATA" "$ERR_JSON" -s 500 -r 20 -p -o "$TUNE_MERGED_ERR"
+run_cmd "5" "$TAG" app-tune2 "$MERGED_DIR/weights.txt"     "$MERGED_DATA" "$APP_JSON" -s "$START_POINT_SURVEY" -r "$RESTARTS" -p -o "$TUNE_MERGED"
+run_cmd "5" "$TAG" app-tune2 "$MERGED_DIR/weights.err.txt" "$MERGED_DATA" "$ERR_JSON" -s "$START_POINT_SURVEY" -r "$RESTARTS" -p -o "$TUNE_MERGED_ERR"
 
 record_phase_time "$STATE_JSON" "$PHASE_KEY" "end"
 log_msg "5" "$TAG" "Completed successfully."

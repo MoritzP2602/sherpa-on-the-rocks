@@ -46,8 +46,8 @@ TUNE_DIR_ERR="tune.err.${ORDER_SAFE}.dir${DIR_INDEX}"
 
 run_cmd "4" "$TAG" app-build "$SCAN_DIR" --order "$ORDER" -o "$APP_JSON" -w weights.txt
 run_cmd "4" "$TAG" app-build "$SCAN_DIR" --order "$ORDER" -o "$ERR_JSON" -w weights.txt --errs
-run_cmd "4" "$TAG" app-tune2 weights.txt data.json "$APP_JSON"                -s 500 -r 20 -p -o "$TUNE_DIR"
-run_cmd "4" "$TAG" app-tune2 weights.txt data.json "$APP_JSON" -e "$ERR_JSON" -s 500 -r 20 -p -o "$TUNE_DIR_ERR"
+run_cmd "4" "$TAG" app-tune2 weights.txt data.json "$APP_JSON"                -s "$START_POINT_SURVEY" -r "$RESTARTS" -p -o "$TUNE_DIR"
+run_cmd "4" "$TAG" app-tune2 weights.txt data.json "$APP_JSON" -e "$ERR_JSON" -s "$START_POINT_SURVEY" -r "$RESTARTS" -p -o "$TUNE_DIR_ERR"
 
 record_phase_time "$STATE_JSON" "$PHASE_KEY" "end"
 log_msg "4" "$TAG" "Completed successfully."

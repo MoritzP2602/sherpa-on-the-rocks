@@ -44,12 +44,18 @@ def parse_template_events(template_path: Path) -> int:
     raise ValueError(f"Could not find EVENTS: in {template_path}")
 
 
-def ensure_required_inputs(input_dir: Path) -> None:
-    required_files = ["parameter.json", "data.json", "template.yaml", "weights.txt"]
+def ensure_required_inputs(input_dir: Path, *, require_parameter: bool, require_nominal: bool) -> None:
+    required_files = ["data.json", "template.yaml", "weights.txt"]
+    if require_parameter:
+        required_files.append("parameter.json")
     for fname in required_files:
         path = input_dir / fname
         if not path.exists():
             raise FileNotFoundError(f"Missing required file: {path}")
+    if require_nominal:
+        nominal_path = input_dir / "nominal.json"
+        if not nominal_path.exists():
+            raise FileNotFoundError(f"Missing required file: {nominal_path}")
     init_dir = input_dir / "init"
     if not init_dir.is_dir():
         raise FileNotFoundError(f"Missing required directory: {init_dir}")
@@ -105,21 +111,19 @@ def phase_overview(state):
     return phases
 
 
-def get_list_value(cfg, key, n_dirs):
-    if key not in cfg:
-        raise KeyError(f"Missing required key: {key}")
-    val = cfg[key]
-    if isinstance(val, list):
-        values = val
-    else:
-        values = [val]
-    if len(values) == 0:
-        raise ValueError(f"{key} must not be empty")
-    if len(values) == 1 and n_dirs == 2:
-        return [values[0], values[0]]
-    if len(values) != n_dirs:
-        raise ValueError(f"{key} must have {n_dirs} entries (or 1 entry to broadcast)")
-    return values
+def get_n_parameters(parameter_json_path: Path) -> int:
+    data = json.loads(parameter_json_path.read_text(encoding="utf-8"))
+    if isinstance(data, dict):
+        if "parameters" in data:
+            p = data["parameters"]
+            if isinstance(p, dict):
+                return len(p)
+            if isinstance(p, list):
+                return len(p)
+        return len(data)
+    if isinstance(data, list):
+        return len(data)
+    raise ValueError(f"Could not obtain number of parameters from {parameter_json_path}")
 
 def get_required_cfg_value(cfg, *keys):
     for key in keys:
@@ -134,13 +138,64 @@ def resolve_cfg_path(value, config_path: Path) -> Path:
     return (config_path.parent / p).resolve()
 
 
+def parse_on_off(value, key: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    raw = str(value).strip().lower()
+    if raw in {"on", "true"}:
+        return True
+    if raw in {"off", "false"}:
+        return False
+    raise ValueError(f"{key} entries must be one of: on/off/true/false, got '{value}'")
+
+def parse_surrogate_order(value: str) -> tuple[int, int]:
+    parts = [x.strip() for x in str(value).split(",")]
+    if len(parts) != 2:
+        raise ValueError("SURROGATE_ORDER must have exactly two comma-separated integers, e.g. '2,1'")
+    try:
+        k_p = int(parts[0])
+        k_q = int(parts[1])
+    except ValueError as e:
+        raise ValueError("SURROGATE_ORDER must contain integers, e.g. '2,1'") from e
+    if k_p < 0 or k_q < 0:
+        raise ValueError("SURROGATE_ORDER entries must be >= 0")
+    return k_p, k_q
+
+def parse_input_dir_blocks(cfg, config_path: Path):
+    blocks = []
+    for key in ("INPUT_DIR1", "INPUT_DIR2"):
+        if key not in cfg:
+            continue
+        block = cfg[key]
+        if not isinstance(block, dict):
+            raise ValueError(f"{key} must be a mapping")
+        if "PATH" not in block:
+            raise KeyError(f"Missing required key: {key}.PATH")
+        if "EVENTS" not in block:
+            raise KeyError(f"Missing required key: {key}.EVENTS")
+
+        if "EVENTS_VALIDATION" in block:
+            events_validation_raw = block["EVENTS_VALIDATION"]
+        else:
+            raise KeyError(f"Missing required key: {key}.EVENTS_VALIDATION")
+
+        blocks.append({
+                "path"                 : resolve_cfg_path(block["PATH"], config_path),
+                "events_raw"           : block["EVENTS"],
+                "events_validation_raw": events_validation_raw,
+                "reweight"             : parse_on_off(block.get("REWEIGHTING", "off"), f"{key}.REWEIGHTING"),
+                "validation_reweight"  : parse_on_off(block.get("VALIDATION_REWEIGHTING", "off"), 
+                                                      f"{key}.VALIDATION_REWEIGHTING")
+                      })
+    if not blocks:
+        raise KeyError("Missing required key: INPUT_DIR1")
+    return blocks
+
+
 def build_state(cfg, config_path: Path):
     required_keys = [
-        "INPUT_DIRS",
+        "INPUT_DIR1",
         "N_GRID",
-        "EVENTS",
-        "EVENTS_VALIDATION",
-        "MERGE_MODE",
         "SURROGATE_ORDER",
         "SHERPA_ON_THE_ROCKS_DIR",
         "APP_TOOLS_INSTALLATION",
@@ -152,20 +207,22 @@ def build_state(cfg, config_path: Path):
         if key not in cfg:
             raise KeyError(f"Missing required key: {key}")
 
-    input_dirs_raw = cfg["INPUT_DIRS"]
-    if isinstance(input_dirs_raw, list):
-        input_dirs_list = input_dirs_raw
-    else:
-        input_dirs_list = [input_dirs_raw]
-    if len(input_dirs_list) not in (1, 2):
-        raise ValueError("INPUT_DIRS must contain one or two entries")
-
-    input_dirs = [resolve_cfg_path(p, config_path) for p in input_dirs_list]
+    input_dir_blocks = parse_input_dir_blocks(cfg, config_path)
+    input_dirs = [b["path"] for b in input_dir_blocks]
     n_dirs = len(input_dirs)
+    if n_dirs not in (1, 2):
+        raise ValueError("Provide one or two input directories via INPUT_DIR1[/INPUT_DIR2]")
 
-    merge_mode = str(cfg["MERGE_MODE"]).strip().lower()
+    merge_mode = str(cfg.get("MERGE_MODE", "yoda")).strip().lower()
     if merge_mode not in {"yoda", "rivet"}:
         raise ValueError("MERGE_MODE must be 'yoda' or 'rivet'")
+
+    start_point_survey = int(cfg.get("START_POINT_SURVEY", 500))
+    restarts = int(cfg.get("RESTARTS", 20))
+    if start_point_survey <= 0:
+        raise ValueError("START_POINT_SURVEY must be > 0")
+    if restarts < 0:
+        raise ValueError("RESTARTS must be >= 0")
 
     combine_mode = str(cfg.get("COMBINE_MODE", "weighted")).strip().lower()
     if n_dirs == 2 and combine_mode not in {"weighted", "equal"}:
@@ -193,37 +250,49 @@ def build_state(cfg, config_path: Path):
     if not sherpa_binary.exists():
         raise FileNotFoundError(f"SHERPA_BINARY does not exist: {sherpa_binary}")
 
-    events_list = get_list_value(cfg, "EVENTS", n_dirs)
-    events_val_list = get_list_value(cfg, "EVENTS_VALIDATION", n_dirs)
-
     n_grid = int(cfg["N_GRID"])
     if n_grid <= 0:
         raise ValueError("N_GRID must be > 0")
-
+    
     surrogate_order = str(cfg["SURROGATE_ORDER"]).strip()
     if not surrogate_order:
         raise ValueError("SURROGATE_ORDER must not be empty")
+    
+    k_p, k_q     = parse_surrogate_order(surrogate_order)
+    grid_warning = ""
+    n_params     = get_n_parameters(input_dirs[0] / "parameter.json")
+    min_grid     = math.comb(n_params + k_p, k_p) + math.comb(n_params + k_q, k_q)
+    if n_grid < min_grid:
+        raise ValueError(f"N_GRID = {n_grid} is too small. Minimum required is "
+                         f"{min_grid} with N_p = {n_params} and order = {surrogate_order}.")
+    if n_grid < 2 * min_grid:
+        grid_warning = (f"WARNING: N_GRID = {n_grid} is < 2 * minimum = {2 * min_grid}. "
+                        f"Using at least double the minimum is recommended for stable surrogate fitting.")
 
     input_states = []
-    for i, idir in enumerate(input_dirs, start=1):
-        ensure_required_inputs(idir)
-        has_nominal     = (idir / "nominal.json").exists()
+    for i, block in enumerate(input_dir_blocks, start=1):
+        idir = block["path"]
+        reweight = block["reweight"]
+        validation_reweight = block["validation_reweight"]
+        ensure_required_inputs(idir, require_parameter=(i == 1), require_nominal=(reweight or validation_reweight))
+
         grid_mode       = "sample" if i == 1 else "import"
-        req_events      = parse_event_value(events_list[i - 1])
-        req_events_val  = parse_event_value(events_val_list[i - 1])
+        req_events      = parse_event_value(block["events_raw"])
+        req_events_val  = parse_event_value(block["events_validation_raw"])
         template_events = parse_template_events(idir / "template.yaml")
         n_subruns       = int(math.ceil(req_events / template_events))
         n_val_subruns   = int(math.ceil(req_events_val / template_events))
 
         input_states.append({
-                "path": str(idir),
-                "reweight"         : bool(has_nominal),
-                "grid_mode"        : grid_mode,
-                "events"           : req_events,
-                "events_validation": req_events_val,
-                "template_events"  : template_events,
-                "n_subruns"        : n_subruns,
-                "n_val_subruns"    : n_val_subruns,
+                "path"               : str(idir),
+                "reweight"           : reweight,
+                "validation_reweight": validation_reweight,
+                "grid_mode"          : grid_mode,
+                "events"             : req_events,
+                "events_validation"  : req_events_val,
+                "template_events"    : template_events,
+                "n_subruns"          : n_subruns,
+                "n_val_subruns"      : n_val_subruns,
                             })
 
     if "MASTER_DIR" in cfg:
@@ -255,9 +324,11 @@ def build_state(cfg, config_path: Path):
         "n_grid"                  : n_grid,
         "surrogate_order"         : surrogate_order,
         "surrogate_order_safe"    : surrogate_order.replace(",", "_"),
-        "merge_mode"              : merge_mode,
+        "start_point_survey"      : start_point_survey,
+        "restarts"                : restarts,
         "combine_mode"            : combine_mode,
         "merged_dir"              : merged_dir,
+        "merge_mode"              : merge_mode,
         "P1_maxruntime"           : int(cfg.get("PHASE1_MAXRUNTIME", 1800)),
         "P2_maxruntime"           : int(cfg.get("PHASE2_MAXRUNTIME", 86400)),
         "P3_maxruntime"           : int(cfg.get("PHASE3_MAXRUNTIME", 86400)),
@@ -271,7 +342,7 @@ def build_state(cfg, config_path: Path):
         "phase_times_file"        : str((master_dir / "phase_times.json").resolve()),
         "dag_path"                : str((master_dir / "tune.dag").resolve()),
     }
-    return state
+    return state, grid_warning
 
 
 def create_dag(state):
@@ -426,7 +497,6 @@ def create_dag(state):
 def main():
     parser = argparse.ArgumentParser(description="Master orchestration for Sherpa + Apprentice tuning")
     parser.add_argument("config", help="Path to YAML steering file")
-    parser.add_argument("--dry-run", action="store_true", help="Render files and stop before submitting the DAG")
     args = parser.parse_args()
 
     print("Starting Initialisation...\n")
@@ -439,7 +509,7 @@ def main():
     cfg = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     if not isinstance(cfg, dict):
         raise SystemExit("Config must be a YAML mapping")
-    state = build_state(cfg, config_path)
+    state, grid_warning = build_state(cfg, config_path)
 
     master_dir = Path(state["master_dir"])
     if master_dir.exists():
@@ -455,12 +525,21 @@ def main():
     print("Overview:")
     print(f"  - Input directories:")
     for idx, item in enumerate(state['input_dirs'], start=1):
-        print(f"      Input {idx}: {item['path']} | grid = {item['grid_mode']} | "
-              f"subruns = {item['n_subruns']} | validation subruns = {item['n_val_subruns']}")
+        output = f"      Input {idx}: {item['path']} | grid = {item['grid_mode']} | "
+        if item['reweight']:
+            output += "reweighting = on | "
+        output += f"subruns = {item['n_subruns']} | "
+        if item['validation_reweight']:
+            output += "validation reweighting = on | "
+        output += f"validation subruns = {item['n_val_subruns']}"
+        print(output)
     print(f"  - Sherpa binary: {state.get('sherpa_binary', '<unset>')}")
     print(f"  - app-tools installation: {state.get('app_tools_installation', '<unset>')}")
     print(f"  - Apprentice installation: {state.get('apprentice_installation', '<unset>')}")
     print(f"  - Rivet environment script: {state['rivet_env_script']}")
+    if grid_warning:
+        print()
+        print(grid_warning)
     print()
     print("  - Phases:")
     for phase, label in phase_overview(state):
@@ -511,10 +590,13 @@ def main():
     dag_path = Path(state["dag_path"])
     dag_path.write_text(dag_content, encoding="utf-8")
     print(f"Created DAG file: {dag_path}")
-    
+
     print()
-    if args.dry_run:
-        print(f"Dry run requested, not submitting DAGMan. Inspect the generated file at {dag_path}")
+    answer = input("Proceed with DAG submission now? [y/N]: ").strip().lower()
+    if answer not in {"y", "yes"}:
+        print(f"Submission cancelled. You can review generated files in: {master_dir}")
+        print(f"Submit manually with: cd {master_dir} && condor_submit_dag {dag_path.name}")
+        print(f"\nInitialization complete!")
         return
 
     print(f"Submitting DAG: condor_submit_dag {dag_path.name}")
