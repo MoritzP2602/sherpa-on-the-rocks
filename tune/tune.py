@@ -229,11 +229,6 @@ def build_state(cfg, config_path: Path):
     if n_dirs == 2 and combine_mode not in {"weighted", "equal"}:
         raise ValueError("COMBINE_MODE must be 'weighted' or 'equal' for two-input tunes")
 
-    if "JOB_DIR" in cfg:
-        job_dir = resolve_cfg_path(cfg["JOB_DIR"], config_path)
-    else:
-        job_dir = Path(os.path.expanduser("~/sherpa-on-the-rocks/tune")).resolve()
-
     rivet_env_script        = resolve_cfg_path(cfg["RIVET_ENV_SCRIPT"], config_path)
     sherpa_on_the_rocks_dir = resolve_cfg_path(cfg["SHERPA_ON_THE_ROCKS_DIR"], config_path)
     app_tools_installation  = resolve_cfg_path(cfg["APP_TOOLS_INSTALLATION"], config_path)
@@ -250,6 +245,10 @@ def build_state(cfg, config_path: Path):
         raise FileNotFoundError(f"APPRENTICE_INSTALLATION does not exist: {apprentice_installation}")
     if not sherpa_binary.exists():
         raise FileNotFoundError(f"SHERPA_BINARY does not exist: {sherpa_binary}")
+    
+    if "JOB_DIR" in cfg:
+        job_dir = resolve_cfg_path(cfg["JOB_DIR"], config_path)
+    else: job_dir = (sherpa_on_the_rocks_dir / "tune").resolve()
 
     n_grid = int(cfg["N_GRID"])
     if n_grid <= 0:

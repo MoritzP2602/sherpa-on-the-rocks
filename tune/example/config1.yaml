@@ -2,14 +2,9 @@ INPUT_DIR1:
   PATH: Drell-Yan
   EVENTS: 10k
   EVENTS_VALIDATION: 6k
-  REWEIGHTING: off
-  VALIDATION_REWEIGHTING: off
 
-N_GRID: 10               # Number of points for tuning grid
-SURROGATE_ORDER: "1,0"   # Order of surrogate models for app-build
-START_POINT_SURVEY: 500  # Size of starting point survey for app-tune2
-RESTARTS: 20             # Number of restarts for app-tune2
-MERGE_MODE: yoda         # Merge mode for combining results ('yoda' or 'rivet')
+N_GRID: 10
+SURROGATE_ORDER: "1,0"
 
 SHERPA_BINARY:           /home/moritz.pabst/Programs/sherpa-ue/install/bin/Sherpa
 SHERPA_ON_THE_ROCKS_DIR: /home/moritz.pabst/sherpa-on-the-rocks
@@ -21,7 +16,6 @@ PHASE1_MAXRUNTIME: 600
 PHASE2_MAXRUNTIME: 600
 PHASE3_MAXRUNTIME: 600
 PHASE4_MAXRUNTIME: 600
-PHASE5_MAXRUNTIME: 600
 PHASE6_MAXRUNTIME: 600
 PHASE7_MAXRUNTIME: 600
 PHASE8_MAXRUNTIME: 600
