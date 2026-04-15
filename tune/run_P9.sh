@@ -1,5 +1,6 @@
 #!/bin/bash
 set -euo pipefail
+log_msg "9" "$TAG" "Started."
 
 STATE_JSON="$1"
 CLUSTER="${2:-}"
@@ -64,7 +65,7 @@ def dur(start, end):
         return 'n/a'
 
 lines = []
-lines.append('Summary')
+lines.append('SUMMARY')
 lines.append(f"DAGMan cluster ID: {state.get('dag_cluster_id', 'unknown')}")
 lines.append('')
 lines.append('Condor cluster IDs per phase:')
@@ -72,14 +73,14 @@ for key in sorted(condor_ids):
     cid = condor_ids[key].get('cluster_id', 'n/a')
     lines.append(f"  - {key}: {cid}")
 lines.append('')
-lines.append('Wall-clock time per phase:')
+lines.append('Measured time per phase:')
 for key in sorted(phase_times):
     st = phase_times[key].get('start_time')
     en = phase_times[key].get('end_time')
     lines.append(f"  - {key}: start = {st or 'n/a'}; end = {en or 'n/a'}; duration = {dur(st, en)}")
 lines.append('')
 # list state here
-
+print()
 print('\n'.join(lines))
 PY
 

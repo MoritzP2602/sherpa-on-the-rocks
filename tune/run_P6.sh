@@ -1,5 +1,6 @@
 #!/bin/bash
 set -euo pipefail
+log_msg "6" "$TAG" "Started."
 
 STATE_JSON="$1"
 DIR_INDEX="$2"
@@ -42,8 +43,6 @@ if [[ "$N_INPUT_DIRS" == "2" ]]; then
 fi
 
 run_cmd "6" "$TAG" bash "$SHERPA_ON_THE_ROCKS_DIR/prepare_runs.sh" validation "$N_VAL_SUBRUNS"
-
-log_msg "6" "$TAG" "Validation setup done. Submission happens in Phase 7."
 
 record_phase_time "$STATE_JSON" "$PHASE_KEY" "end"
 log_msg "6" "$TAG" "Completed successfully."

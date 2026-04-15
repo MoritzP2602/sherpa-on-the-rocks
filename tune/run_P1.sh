@@ -1,5 +1,6 @@
 #!/bin/bash
 set -euo pipefail
+log_msg "1" "$TAG" "Started."
 
 STATE_JSON="$1"
 DIR_INDEX="$2"

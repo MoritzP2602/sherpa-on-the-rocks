@@ -1,5 +1,6 @@
 #!/bin/bash
 set -euo pipefail
+log_msg "5" "$TAG" "Started."
 
 STATE_JSON="$1"
 CLUSTER="${2:-}"
