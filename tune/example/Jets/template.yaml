@@ -1,0 +1,53 @@
+EVENTS: 2k
+BEAMS: 2212
+BEAM_ENERGIES: 3500
+
+EVENT_GENERATION_MODE: Weighted
+BATCH_MODE: 3
+PDF_LIBRARY: LHAPDFSherpa
+
+AMISIC:
+  nB_bins: 20
+  MAX_REWEIGHT_FACTOR: 10000
+  MU_R_FACTOR: 0.5
+  MU_F_FACTOR: 1.0
+  PT_Min(ref): {PT_Min}
+  SIGMA_ND_NORM: {SIGMA_ND_NORM}
+
+REMNANTS:
+  2212:
+    MATTER_FORM: Double_Gaussian
+    MATTER_RADIUS_1: {MATTER_RADIUS_1}
+    MATTER_RADIUS_2: 1.0
+    MATTER_FRACTION_1: {MATTER_FRACTION_1}
+
+COLOUR_RECONNECTIONS:
+  MODE: Off
+
+PROCESSES:
+- 93 93 -> 93 93:
+    Order: {{QCD: 2, EW: 0}}
+    NLO_Mode: MC@NLO
+    Loop_Generator: OpenLoops
+    ME_Generator: Amegic
+    RS_ME_Generator: Amegic
+    NLO_Order: {{QCD: 1, EW: 0}}
+
+SELECTORS:
+- FastjetFinder:
+    Algorithm: antikt
+    N: 1
+    PTMin: 20.0
+    DR:     0.4
+
+ANALYSIS: Rivet
+RIVET:
+  IGNORE_BEAMS: 1
+  ANALYSES:
+    # CMS
+    - CMS_2011_S9120041 # Traditional leading jet UE measurement at sqrt(s) = 0.9 and 7 TeV
+    - CMS_2011_S9215166 # Forward energy flow in MB and dijet events at 0.9 and 7 TeV
+    - CMS_2011_S8957746 # Event shapes at 7 TeV
+    # ATLAS
+    - ATLAS_2011_I929691 # Jet fragmentation at 7 TeV
+    - ATLAS_2014_I1298811 # Leading jet underlying event at 7 TeV in ATLAS

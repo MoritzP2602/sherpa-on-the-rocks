@@ -76,6 +76,7 @@ def stack_json_values(left, right):
         return left
     return [left, right]
 
+
 def write_stacked_json_values(input_dirs: list[Path], merged_dir: Path) -> None:
     if len(input_dirs) != 2:
         return
@@ -345,152 +346,286 @@ def build_state(cfg, config_path: Path):
     return state, grid_warning
 
 
-def create_dag(state):
+def dag_jobs(n_dirs: int) -> list[str]:
+    jobs: list[str] = []
+    for i in range(1, n_dirs + 1):
+        jobs.extend([f"P1_dir{i}", f"P2_dir{i}", f"P3_dir{i}", f"P4_dir{i}"])
+    if n_dirs == 2:
+        jobs.append("P5")
+    for i in range(1, n_dirs + 1):
+        jobs.extend([f"P6_dir{i}", f"P7_dir{i}", f"P8_dir{i}"])
+    jobs.append("P9")
+    return jobs
+
+
+def dag_dependencies(n_dirs: int) -> list[tuple[str, str]]:
+    edges: list[tuple[str, str]] = []
+    for i in range(1, n_dirs + 1):
+        edges.extend([
+                (f"P1_dir{i}", f"P2_dir{i}"),
+                (f"P2_dir{i}", f"P3_dir{i}"),
+                (f"P3_dir{i}", f"P4_dir{i}"),
+                     ])
+    if n_dirs == 2:
+        edges.extend([
+                ("P4_dir1", "P5"),
+                ("P4_dir2", "P5"),
+                ("P5", "P6_dir1"),
+                ("P5", "P6_dir2"),
+                ("P6_dir1", "P7_dir1"),
+                ("P6_dir2", "P7_dir2"),
+                ("P7_dir1", "P8_dir1"),
+                ("P7_dir2", "P8_dir2"),
+                ("P8_dir1", "P9"),
+                ("P8_dir2", "P9"),
+                     ])
+    else:
+        edges.extend([
+                ("P4_dir1", "P6_dir1"),
+                ("P6_dir1", "P7_dir1"),
+                ("P7_dir1", "P8_dir1"),
+                ("P8_dir1", "P9"),
+                     ])
+    return edges
+
+
+def completed_jobs_from_phase_times(phase_times: dict, n_dirs: int) -> set[str]:
+    completed: set[str] = set()
+    for job in dag_jobs(n_dirs):
+        if (phase_times.get(job) or {}).get("end_time"):
+            completed.add(job)
+    return completed
+
+
+def jobs_to_resume(phase_times: dict, n_dirs: int) -> set[str]:
+    all_jobs = dag_jobs(n_dirs)
+    completed = completed_jobs_from_phase_times(phase_times, n_dirs)
+    include: set[str] = {job for job in all_jobs if job not in completed}
+
+    changed = True
+    edges = dag_dependencies(n_dirs)
+    while changed:
+        changed = False
+        for parent, child in edges:
+            if parent in include and child not in include:
+                include.add(child)
+                changed = True
+    return include
+
+
+def reset_phase_output(state: dict, jobs: set[str]) -> list[Path]:
+    croot = Path(state["condor_output"])
+    recreated: list[Path] = []
+    for job in sorted(jobs):
+        if "_dir" in job:
+            phase, dir_idx = job.split("_dir", 1)
+            target = croot / f"{phase}_dir{dir_idx}"
+        else:
+            target = croot / job
+        if target.exists():
+            shutil.rmtree(target)
+        target.mkdir(parents=True, exist_ok=True)
+        recreated.append(target)
+    return recreated
+
+
+def cleanup_dagman_files(master_dir: Path, dag_path: Path) -> None:
+    base_name = dag_path.name
+    for p in sorted(master_dir.glob(f"{base_name}.rescue*")):
+        if p.is_file():
+            p.unlink()
+    lock_path = master_dir / f"{base_name}.lock"
+    if lock_path.exists() and lock_path.is_file():
+        lock_path.unlink()
+    blocking_files = [
+        f"{base_name}.condor.sub",
+        f"{base_name}.lib.out",
+        f"{base_name}.lib.err",
+        f"{base_name}.dagman.log",
+        f"{base_name}.metrics",
+        f"{base_name}.nodes.log",
+    ]
+    for fname in blocking_files:
+        p = master_dir / fname
+        if p.exists() and p.is_file():
+            p.unlink()
+    for p in sorted(master_dir.glob(f"{base_name}.dagman.out*")):
+        if p.is_file():
+            p.unlink()
+    print(f"Removed existing DAGMan files in {master_dir}")
+    return
+
+
+def handle_resume(current_state: dict) -> tuple[dict, Path, bool, set[str]]:
+    state = current_state
+    resume_mode = False
+    resume_jobs: set[str] = set()
+    master_dir = Path(state["master_dir"])
+
+    if master_dir.exists():
+        if not master_dir.is_dir():
+            raise SystemExit(f"Master path exists but is not a directory: {master_dir}")
+
+        saved_state_path = master_dir / "state.json"
+        saved_phase_times_path = master_dir / "phase_times.json"
+        if saved_state_path.exists() and saved_phase_times_path.exists():
+            try:
+                saved_state = json.loads(saved_state_path.read_text(encoding="utf-8"))
+                phase_times = json.loads(saved_phase_times_path.read_text(encoding="utf-8"))
+            except Exception as e:
+                print(f"Found existing run metadata but could not parse it for resume: {e}")
+            else:
+                if comparable_state(saved_state) == comparable_state(state):
+                    n_dirs_saved = len(saved_state["input_dirs"])
+                    resume_jobs_candidate = jobs_to_resume(phase_times, n_dirs_saved)
+                    if not resume_jobs_candidate:
+                        print("Detected existing completed run (all phases have end_time).")
+                    else:
+                        completed_jobs = completed_jobs_from_phase_times(phase_times, n_dirs_saved)
+                        print(f"Detected resumable run in: {master_dir}")
+                        print(f"Completed jobs: {len(completed_jobs)} / {len(dag_jobs(n_dirs_saved))}. "
+                              f"Will submit remaining jobs: {len(resume_jobs_candidate)}")
+                        answer = input("Resume at job level and keep existing outputs? [y/N]: ").strip().lower()
+                        if answer in {"y", "yes"}:
+                            resume_mode = True
+                            state = saved_state
+                            resume_jobs = resume_jobs_candidate
+                            master_dir = Path(state["master_dir"])
+                        else: print("Resume declined.")
+                else: print("Existing run state does not match current config-derived state. Resume is disabled.")
+        if not resume_mode:
+            answer = input(f"Master directory already exists: {master_dir}\nRemove it and continue? [y/N]: ").strip().lower()
+            if answer not in {"y", "yes"}:
+                raise SystemExit("Aborted.")
+            shutil.rmtree(master_dir)
+    if not resume_mode:
+        master_dir.mkdir(parents=True, exist_ok=False)
+        print(f"Created master directory: {master_dir}\n")
+    else:
+        print(f"Using existing master directory: {master_dir}\n")
+        print("Resume mode: keeping existing state, condor IDs, phase times, and outputs.")
+        if resume_jobs:
+            recreated = reset_phase_output(state, resume_jobs)
+            print(f"Reset condor output directories for {len(recreated)} uncompleted job(s).")
+            cleanup_dagman_files(master_dir, Path(state["dag_path"]))
+    return state, master_dir, resume_mode, resume_jobs
+
+
+def comparable_state(state: dict) -> dict:
+    normalized = json.loads(json.dumps(state))
+    normalized.pop("created_at", None)
+    normalized.pop("dag_cluster_id", None)
+    normalized.pop("config_path", None)
+    normalized.pop("condor_ids_file", None)
+    normalized.pop("phase_times_file", None)
+    normalized.pop("dag_path", None)
+    return normalized
+
+
+def create_dag(state, include_jobs: set[str]):
     master_dir = Path(state["master_dir"]) 
-    croot = Path(state["condor_output"]) 
-    job_dir = Path(state["job_dir"]) 
+    croot      = Path(state["condor_output"]) 
+    job_dir    = Path(state["job_dir"]) 
     state_path = str((master_dir / "state.json").resolve())
-    n_dirs = len(state["input_dirs"])
+    n_dirs     = len(state["input_dirs"])
+
+    def include_job(job_name: str) -> bool:
+        return job_name in include_jobs
 
     lines = []
     lines.append("# Auto-generated by tune.py")
-
     def v(name, submit, vars_map):
         lines.append(f"JOB {name} {(job_dir / submit).resolve()}")
         vars_str = " ".join([f'{k}="{v}"' for k, v in vars_map.items()])
         lines.append(f"VARS {name} {vars_str}")
-
     for i in range(1, n_dirs + 1):
-        v(
-            f"P1_D{i}",
-            "P1.jdf",
-            {
-                "JOB_DIR"       : str(job_dir),
-                "STATE_JSON"    : state_path,
-                "DIR_INDEX"     : str(i),
-                "PHASE_LOG_DIR" : str(croot / f"P1_dir{i}"),
-                "MAXRUNTIME"    : str(state["P1_maxruntime"]),
-            },
-        )
-        v(
-            f"P2_D{i}",
-            "P2.jdf",
-            {
-                "JOB_DIR"       : str(job_dir),
-                "STATE_JSON"    : state_path,
-                "DIR_INDEX"     : str(i),
-                "PHASE_LOG_DIR" : str(croot / f"P2_dir{i}"),
-                "RUNS_FILE"     : str(Path(state["input_dirs"][i - 1]["path"]) / "runs.txt"),
-                "RUN_DIR"       : state["input_dirs"][i - 1]["path"],
-                "MAXRUNTIME"    : str(state["P2_maxruntime"]),
-                "PHASE_KEY"     : "P2",
-            },
-        )
-        v(
-            f"P3_D{i}",
-            "P3.jdf",
-            {
-                "JOB_DIR"       : str(job_dir),
-                "STATE_JSON"    : state_path,
-                "DIR_INDEX"     : str(i),
-                "PHASE_LOG_DIR" : str(croot / f"P3_dir{i}"),
-                "MAXRUNTIME"    : str(state["P3_maxruntime"]),
-            },
-        )
-        v(
-            f"P4_D{i}",
-            "P4.jdf",
-            {
-                "JOB_DIR"       : str(job_dir),
-                "STATE_JSON"    : state_path,
-                "DIR_INDEX"     : str(i),
-                "PHASE_LOG_DIR" : str(croot / f"P4_dir{i}"),
-                "MAXRUNTIME"    : str(state["P4_maxruntime"]),
-            },
-        )
-    if n_dirs == 2:
-        v(
-            f"P5",
-            "P5.jdf",
-            {
-                "JOB_DIR"       : str(job_dir),
-                "STATE_JSON"    : state_path,
-                "PHASE_LOG_DIR" : str(croot / f"P5"),
-                "MAXRUNTIME"    : str(state["P5_maxruntime"]),
-            },
-        )
+        if include_job(f"P1_dir{i}"):
+            v(f"P1_dir{i}",
+              f"P1.jdf",
+                {"JOB_DIR"       : str(job_dir),
+                 "STATE_JSON"    : state_path,
+                 "DIR_INDEX"     : str(i),
+                 "PHASE_LOG_DIR" : str(croot / f"P1_dir{i}"),
+                 "MAXRUNTIME"    : str(state["P1_maxruntime"])})
+        if include_job(f"P2_dir{i}"):
+            v(f"P2_dir{i}",
+              f"P2.jdf",
+                {"JOB_DIR"       : str(job_dir),
+                 "STATE_JSON"    : state_path,
+                 "DIR_INDEX"     : str(i),
+                 "PHASE_LOG_DIR" : str(croot / f"P2_dir{i}"),
+                 "RUNS_FILE"     : str(Path(state["input_dirs"][i - 1]["path"]) / "runs.txt"),
+                 "RUN_DIR"       : state["input_dirs"][i - 1]["path"],
+                 "MAXRUNTIME"    : str(state["P2_maxruntime"]),
+                 "PHASE_KEY"     : "P2"})
+        if include_job(f"P3_dir{i}"):
+            v(f"P3_dir{i}",
+              f"P3.jdf",
+                {"JOB_DIR"       : str(job_dir),
+                 "STATE_JSON"    : state_path,
+                 "DIR_INDEX"     : str(i),
+                 "PHASE_LOG_DIR" : str(croot / f"P3_dir{i}"),
+                 "MAXRUNTIME"    : str(state["P3_maxruntime"])})
+        if include_job(f"P4_dir{i}"):
+            v(f"P4_dir{i}",
+              f"P4.jdf",
+                {"JOB_DIR"       : str(job_dir),
+                 "STATE_JSON"    : state_path,
+                 "DIR_INDEX"     : str(i),
+                 "PHASE_LOG_DIR" : str(croot / f"P4_dir{i}"),
+                 "MAXRUNTIME"    : str(state["P4_maxruntime"])})
+    if include_job("P5"):
+            v(f"P5",
+              f"P5.jdf",
+                {"JOB_DIR"       : str(job_dir),
+                 "STATE_JSON"    : state_path,
+                 "PHASE_LOG_DIR" : str(croot / f"P5"),
+                 "MAXRUNTIME"    : str(state["P5_maxruntime"])})
     for i in range(1, n_dirs + 1):
-        v(
-            f"P6_D{i}",
-            "P6.jdf",
-            {
-                "JOB_DIR"       : str(job_dir),
-                "STATE_JSON"    : state_path,
-                "DIR_INDEX"     : str(i),
-                "PHASE_LOG_DIR" : str(croot / f"P6_dir{i}"),
-                "MAXRUNTIME"    : str(state["P6_maxruntime"]),
-            },
-        )
-        v(
-            f"P7_D{i}",
-            "P7.jdf",
-            {
-                "JOB_DIR"       : str(job_dir),
-                "STATE_JSON"    : state_path,
-                "DIR_INDEX"     : str(i),
-                "RUN_DIR"       : state["input_dirs"][i - 1]["path"],
-                "RUNS_FILE"     : str(Path(state["input_dirs"][i - 1]["path"]) / "runs.txt"),
-                "PHASE_LOG_DIR" : str(croot / f"P7_dir{i}"),
-                "MAXRUNTIME"    : str(state["P7_maxruntime"]),
-                "PHASE_KEY"     : "P7",
-            },
-        )
-        v(
-            f"P8_D{i}",
-            "P8.jdf",
-            {
-                "JOB_DIR"       : str(job_dir),
-                "STATE_JSON"    : state_path,
-                "DIR_INDEX"     : str(i),
-                "PHASE_LOG_DIR" : str(croot / f"P8_dir{i}"),
-                "MAXRUNTIME"    : str(state["P8_maxruntime"]),
-            },
-        )
-    v(
-            f"P9",
-            "P9.jdf",
-            {
-                "JOB_DIR"       : str(job_dir),
-                "STATE_JSON"    : state_path,
-                "PHASE_LOG_DIR" : str(croot / f"P9"),
-                "MAXRUNTIME"    : str(state["P9_maxruntime"]),
-            },
-    )
-
+        if include_job(f"P6_dir{i}"):
+            v(f"P6_dir{i}",
+              f"P6.jdf",
+                {"JOB_DIR"       : str(job_dir),
+                 "STATE_JSON"    : state_path,
+                 "DIR_INDEX"     : str(i),
+                 "PHASE_LOG_DIR" : str(croot / f"P6_dir{i}"),
+                 "MAXRUNTIME"    : str(state["P6_maxruntime"])})
+        if include_job(f"P7_dir{i}"):
+            v(f"P7_dir{i}",
+              f"P7.jdf",
+                {"JOB_DIR"       : str(job_dir),
+                 "STATE_JSON"    : state_path,
+                 "DIR_INDEX"     : str(i),
+                 "RUN_DIR"       : state["input_dirs"][i - 1]["path"],
+                 "RUNS_FILE"     : str(Path(state["input_dirs"][i - 1]["path"]) / "runs.txt"),
+                 "PHASE_LOG_DIR" : str(croot / f"P7_dir{i}"),
+                 "MAXRUNTIME"    : str(state["P7_maxruntime"]),
+                 "PHASE_KEY"     : "P7"})
+        if include_job(f"P8_dir{i}"):
+            v(f"P8_dir{i}",
+              f"P8.jdf",
+                {"JOB_DIR"       : str(job_dir),
+                 "STATE_JSON"    : state_path,
+                 "DIR_INDEX"     : str(i),
+                 "PHASE_LOG_DIR" : str(croot / f"P8_dir{i}"),
+                 "MAXRUNTIME"    : str(state["P8_maxruntime"])})
+    if include_job("P9"):
+            v(f"P9",
+              f"P9.jdf",
+                {"JOB_DIR"       : str(job_dir),
+                 "STATE_JSON"    : state_path,
+                 "PHASE_LOG_DIR" : str(croot / f"P9"),
+                 "MAXRUNTIME"    : str(state["P9_maxruntime"])})
     for i in range(1, n_dirs + 1):
-        lines.append(f"RETRY P2_D{i} 0")
-        lines.append(f"SCRIPT POST P2_D{i} /bin/true")
-        lines.append(f"RETRY P7_D{i} 0")
-        lines.append(f"SCRIPT POST P7_D{i} /bin/true")
-
-    for i in range(1, n_dirs + 1):
-        lines.append(f"PARENT P1_D{i} CHILD P2_D{i}")
-        lines.append(f"PARENT P2_D{i} CHILD P3_D{i}")
-        lines.append(f"PARENT P3_D{i} CHILD P4_D{i}")
-    if n_dirs == 2:
-        lines.append("PARENT P4_D1 P4_D2 CHILD P5")
-        lines.append("PARENT P5 CHILD P6_D1 P6_D2")
-        lines.append("PARENT P6_D1 CHILD P7_D1")
-        lines.append("PARENT P6_D2 CHILD P7_D2")
-        lines.append("PARENT P7_D1 CHILD P8_D1")
-        lines.append("PARENT P7_D2 CHILD P8_D2")
-        lines.append("PARENT P8_D1 P8_D2 CHILD P9")
-    else:
-        lines.append("PARENT P4_D1 CHILD P6_D1")
-        lines.append("PARENT P6_D1 CHILD P7_D1")
-        lines.append("PARENT P7_D1 CHILD P8_D1")
-        lines.append("PARENT P8_D1 CHILD P9")
-
+        if include_job(f"P2_dir{i}"):
+            lines.append(f"RETRY P2_dir{i} 0")
+            lines.append(f"SCRIPT POST P2_dir{i} /bin/true")
+        if include_job(f"P7_dir{i}"):
+            lines.append(f"RETRY P7_dir{i} 0")
+            lines.append(f"SCRIPT POST P7_dir{i} /bin/true")
+    for parent, child in dag_dependencies(n_dirs):
+        if include_job(parent) and include_job(child):
+            lines.append(f"PARENT {parent} CHILD {child}")
     return "\n".join(lines) + "\n"
 
 
@@ -510,17 +645,7 @@ def main():
     if not isinstance(cfg, dict):
         raise SystemExit("Config must be a YAML mapping")
     state, grid_warning = build_state(cfg, config_path)
-
-    master_dir = Path(state["master_dir"])
-    if master_dir.exists():
-        if not master_dir.is_dir():
-            raise SystemExit(f"Master path exists but is not a directory: {master_dir}")
-        answer = input(f"Master directory already exists: {master_dir}\nRemove it and continue? [y/N]: ").strip().lower()
-        if answer not in {"y", "yes"}:
-            raise SystemExit("Aborted.")
-        shutil.rmtree(master_dir)
-    master_dir.mkdir(parents=True, exist_ok=False)
-    print(f"Created master directory: {master_dir}\n")
+    state, master_dir, resume_mode, resume_jobs = handle_resume(state)
 
     print("Overview:")
     print(f"  - Input directories:")
@@ -547,49 +672,55 @@ def main():
             print(f"    {phase} | {label} (maxruntime = {state.get(f'{phase}_maxruntime', 'n/a')})")
         else: 
             print(f"    {phase} | {label}")
+    if resume_mode: print("  - Resuming jobs: " + ", ".join(sorted(resume_jobs)))
     print()
 
-    condor_output = Path(state["condor_output"])
-    condor_output.mkdir(parents=True, exist_ok=True)
-    for phase in ["P1", "P2", "P3", "P4", "P6", "P7", "P8"]:
-        for i in range(1, len(state["input_dirs"]) + 1):
-            (condor_output / f"{phase}_dir{i}").mkdir(parents=True, exist_ok=True)
-    if len(state["input_dirs"]) == 2:
-        (condor_output / "P5").mkdir(parents=True, exist_ok=True)
-    (condor_output / "P9").mkdir(parents=True, exist_ok=True)
-    print(f"Created condor output directories: {condor_output}")
-
-    if state["merged_dir"]:
-        merged_dir = Path(state["merged_dir"])
-        if merged_dir.exists():
-            raise SystemExit(f"Merged directory already exists: {merged_dir}")
-        merged_dir.mkdir(parents=True, exist_ok=False)
-        print(f"Created merged directory: {merged_dir}")
-        if len(state["input_dirs"]) == 2:
-            input_dir_paths = [Path(item["path"]) for item in state["input_dirs"]]
-            write_stacked_json_values(input_dir_paths, merged_dir)
-            print(f"Created combined reference data JSON:{merged_dir / 'data.json'}")
     state_path = master_dir / "state.json"
-    state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
-    print(f"Created state file: {state_path}")
+    condor_ids = None
+    if not resume_mode:
+        condor_output = Path(state["condor_output"])
+        condor_output.mkdir(parents=True, exist_ok=True)
+        for phase in ["P1", "P2", "P3", "P4", "P6", "P7", "P8"]:
+            for i in range(1, len(state["input_dirs"]) + 1):
+                (condor_output / f"{phase}_dir{i}").mkdir(parents=True, exist_ok=True)
+        if len(state["input_dirs"]) == 2:
+            (condor_output / "P5").mkdir(parents=True, exist_ok=True)
+        (condor_output / "P9").mkdir(parents=True, exist_ok=True)
+        print(f"Created condor output directories: {condor_output}")
 
-    condor_ids = {"dagman": {"cluster_id": None}}
-    for i in range(1, len(state["input_dirs"]) + 1):
-        for p in [1, 2, 3, 4, 6, 7, 8]:
-            condor_ids[f"P{p}_dir{i}"] = {"cluster_id": None}
-    if len(state["input_dirs"]) == 2:
-        condor_ids["P5"] = {"cluster_id": None}
-    condor_ids["P9"] = {"cluster_id": None}
-    Path(state["condor_ids_file"]).write_text(json.dumps(condor_ids, indent=2), encoding="utf-8")
-    print(f"Created condor IDs file: {state['condor_ids_file']}")
+        if state["merged_dir"]:
+            merged_dir = Path(state["merged_dir"])
+            if merged_dir.exists():
+                raise SystemExit(f"Merged directory already exists: {merged_dir}")
+            merged_dir.mkdir(parents=True, exist_ok=False)
+            print(f"Created merged directory: {merged_dir}")
+            if len(state["input_dirs"]) == 2:
+                input_dir_paths = [Path(item["path"]) for item in state["input_dirs"]]
+                write_stacked_json_values(input_dir_paths, merged_dir)
+                print(f"Created combined reference data JSON:{merged_dir / 'data.json'}")
+        state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        print(f"Created state file: {state_path}")
 
-    Path(state["phase_times_file"]).write_text("{}\n", encoding="utf-8")
-    print(f"Created phase times file: {state['phase_times_file']}")
+        condor_ids = {"dagman": {"cluster_id": None}}
+        for i in range(1, len(state["input_dirs"]) + 1):
+            for p in [1, 2, 3, 4, 6, 7, 8]:
+                condor_ids[f"P{p}_dir{i}"] = {"cluster_id": None}
+        if len(state["input_dirs"]) == 2:
+            condor_ids["P5"] = {"cluster_id": None}
+        condor_ids["P9"] = {"cluster_id": None}
+        Path(state["condor_ids_file"]).write_text(json.dumps(condor_ids, indent=2), encoding="utf-8")
+        print(f"Created condor IDs file: {state['condor_ids_file']}")
 
-    dag_content = create_dag(state)
+        Path(state["phase_times_file"]).write_text("{}\n", encoding="utf-8")
+        print(f"Created phase times file: {state['phase_times_file']}")
+
+    dag_content = create_dag(state, include_jobs=resume_jobs if resume_mode else set(dag_jobs(len(state["input_dirs"]))))
     dag_path = Path(state["dag_path"])
     dag_path.write_text(dag_content, encoding="utf-8")
-    print(f"Created DAG file: {dag_path}")
+    if resume_mode:
+        print(f"Created DAG file for job-level resume ({len(resume_jobs or set())} jobs): {dag_path}")
+    else:
+        print(f"Created DAG file: {dag_path}")
 
     print()
     answer = input("Proceed with DAG submission now? [y/N]: ").strip().lower()
@@ -615,7 +746,16 @@ def main():
     m = re.search(r"submitted to cluster\s+(\d+)", (proc.stdout or "") + "\n" + (proc.stderr or ""), re.IGNORECASE)
     dag_cluster_id = m.group(1) if m else "unknown"
     state["dag_cluster_id"] = dag_cluster_id
-    state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    if state_path.exists():
+        state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    if condor_ids is None:
+        condor_ids = {}
+        condor_ids_path = Path(state["condor_ids_file"])
+        if condor_ids_path.exists():
+            try:
+                condor_ids = json.loads(condor_ids_path.read_text(encoding="utf-8"))
+            except Exception:
+                condor_ids = {}
     condor_ids["dagman"] = {"cluster_id": dag_cluster_id}
     Path(state["condor_ids_file"]).write_text(json.dumps(condor_ids, indent=2), encoding="utf-8")
 

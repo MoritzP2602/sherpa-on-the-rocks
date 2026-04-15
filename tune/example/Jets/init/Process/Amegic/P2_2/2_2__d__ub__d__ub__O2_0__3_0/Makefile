@@ -1,0 +1,8 @@
+set(libProc_2_2__d__ub__d__ub__O2_0__3_0_la_SOURCES 
+V.C
+V_Z.C
+)
+add_library(Proc_2_2__d__ub__d__ub__O2_0__3_0SHARED${libProc_2_2__d__ub__d__ub__O2_0__3_0_la_SOURCES})
+amegic_handle_shared_library(Proc_2_2__d__ub__d__ub__O2_0__3_0)
+install(TARGETS Proc_2_2__d__ub__d__ub__O2_0__3_0 DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR})
+
