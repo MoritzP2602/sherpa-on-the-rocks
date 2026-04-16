@@ -44,7 +44,7 @@ Tune settings are customized in the steering files (e.g. [config1.yaml](config1.
 
 ## How to start
 
-From the `example` directory:
+From the `example` directory (adjust the paths to the required installations before running):
 
 ```bash
 python3 tune.py config1.yaml

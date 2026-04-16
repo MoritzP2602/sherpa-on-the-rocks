@@ -14,8 +14,8 @@ MERGED_DIR: merged
 N_GRID: 50
 SURROGATE_ORDER: 2,0
 
-SHERPA_BINARY:           ~/Programs/sherpa-ue/install/bin/Sherpa
+RIVET_ENV_SCRIPT:        ~/Programs/local/rivetenv.sh
 SHERPA_ON_THE_ROCKS_DIR: ~/sherpa-on-the-rocks
 APP_TOOLS_INSTALLATION:  ~/Programs/local/bin
 APPRENTICE_INSTALLATION: ~/Programs/local/bin
-RIVET_ENV_SCRIPT:        ~/Programs/local/rivetenv.sh
+SHERPA_BINARY:           ~/Programs/sherpa/install/bin/Sherpa
