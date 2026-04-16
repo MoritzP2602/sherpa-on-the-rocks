@@ -66,6 +66,12 @@ cat MASTER_DIR/condor_output/P9/job.*.out
 
 Replace `MASTER_DIR` with your configured master directory (default is `INPUT_DIR1/master` unless set explicitly).
 
+An extensive summary of the phase outputs can be generated using the `output.py` script:
+
+```bash
+python3 ../output.py MASTER_DIR
+```
+
 ## Debugging and monitoring
 
 Main places to inspect:
@@ -78,4 +84,4 @@ Main places to inspect:
   - `tune.dag`
   - `tune.dag.*` (DAGMan runtime files)
 
-If something fails, first check the corresponding `job.*.out`, `job.*.err`, `job.*.log` in the phase folder.
+If something fails, first check the corresponding `job.*.out`, `job.*.err`, `job.*.log` in the condor output directory.

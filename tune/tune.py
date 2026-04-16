@@ -634,7 +634,7 @@ def create_dag(state, include_jobs: set[str]):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Master orchestration for Sherpa + Apprentice tuning")
+    parser = argparse.ArgumentParser()
     parser.add_argument("config", help="Path to YAML steering file")
     args = parser.parse_args()
 
