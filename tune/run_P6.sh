@@ -43,5 +43,10 @@ fi
 
 run_cmd "6" "$TAG" bash "$SHERPA_ON_THE_ROCKS_DIR/prepare_runs.sh" validation "$N_VAL_SUBRUNS"
 
+if [[ ! -f runs.txt ]]; then
+  log_msg "6" "$TAG" "Failed: prepare_runs.sh did not create runs.txt."
+  exit 1
+fi
+
 record_phase_time "$STATE_JSON" "$PHASE_KEY" "end"
 log_msg "6" "$TAG" "Completed successfully."

@@ -30,9 +30,7 @@ cd "$INPUT_DIR"
 SCAN_DIR="newscan"
 if [[ "$REWEIGHT" == "1" ]]; then
   if command -v app-tools-split_reweighting >/dev/null 2>&1; then
-    run_cmd "4" "$TAG" app-tools-split_reweighting newscan.rew "MPI.v" --variations newscan.rew.var.dat
-  elif command -v app-tools-split_reweighted_runs >/dev/null 2>&1; then
-    run_cmd "4" "$TAG" app-tools-split_reweighted_runs newscan.rew "MPI.v" --variations newscan.rew.var.dat
+    run_cmd "4" "$TAG" app-tools-split_reweighting newscan.rew "$PATTERN" --variations newscan.rew.var.dat --overwrite
   else
     log_msg "4" "$TAG" "ERROR: app-tools-split_reweighting not found."
     exit 1
@@ -40,13 +38,13 @@ if [[ "$REWEIGHT" == "1" ]]; then
   SCAN_DIR="newscan.rew.split"
 fi
 
-APP_JSON="app_${ORDER_SAFE}.json"
-ERR_JSON="err_${ORDER_SAFE}.json"
-TUNE_DIR="tune.${ORDER_SAFE}.dir${DIR_INDEX}"
-TUNE_DIR_ERR="tune.err.${ORDER_SAFE}.dir${DIR_INDEX}"
+APP_JSON="app_${SURROGATE_ORDER_SAFE}.json"
+ERR_JSON="err_${SURROGATE_ORDER_SAFE}.json"
+TUNE_DIR="tune.${SURROGATE_ORDER_SAFE}.dir${DIR_INDEX}"
+TUNE_DIR_ERR="tune.err.${SURROGATE_ORDER_SAFE}.dir${DIR_INDEX}"
 
-run_cmd "4" "$TAG" app-build "$SCAN_DIR" --order "$ORDER" -o "$APP_JSON" -w weights.txt
-run_cmd "4" "$TAG" app-build "$SCAN_DIR" --order "$ORDER" -o "$ERR_JSON" -w weights.txt --errs
+run_cmd "4" "$TAG" app-build "$SCAN_DIR" --order "$SURROGATE_ORDER" -o "$APP_JSON" -w weights.txt
+run_cmd "4" "$TAG" app-build "$SCAN_DIR" --order "$SURROGATE_ORDER" -o "$ERR_JSON" -w weights.txt --errs
 run_cmd "4" "$TAG" app-tune2 weights.txt data.json "$APP_JSON"                -s "$START_POINT_SURVEY" -r "$RESTARTS" -p -o "$TUNE_DIR"
 run_cmd "4" "$TAG" app-tune2 weights.txt data.json "$APP_JSON" -e "$ERR_JSON" -s "$START_POINT_SURVEY" -r "$RESTARTS" -p -o "$TUNE_DIR_ERR"
 

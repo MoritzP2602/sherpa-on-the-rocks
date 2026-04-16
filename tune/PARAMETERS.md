@@ -1,4 +1,4 @@
-# Tune.py Configuration Parameters
+# Configuration Parameters
 
 ## Required Parameters
 
@@ -37,6 +37,16 @@
 - **Example**: `2,1` or `"2,1"`
 - **Description**: Polynomial order for the surrogate model used by `app-build`. Specify as two comma-separated integers representing the orders for the primary and secondary surrogates. The minimum required grid size is determined by combinatorial formulas based on this order and the number of parameters.
 
+### PATTERN
+- **Type**: String
+- **Condition**: **Required** if `INPUT_DIR1.REWEIGHTING` or `INPUT_DIR2.REWEIGHTING` is `on`.
+- **Description**: Pattern passed to `app-tools-split_reweighting` in phase P4 to split reweighted runs.
+- **Note**: Not required when only `VALIDATION_REWEIGHTING` is enabled.
+
+### RIVET_ENV_SCRIPT
+- **Type**: Path
+- **Description**: Path to the Rivet environment setup script (e.g., `rivetenv.sh`). 
+
 ### SHERPA_ON_THE_ROCKS_DIR
 - **Type**: Path
 - **Description**: Path to the sherpa-on-the-rocks directory. If not otherwise specified using `JOB_DIR`, the job submission files are loaded from `SHERPA_ON_THE_ROCKS_DIR/tune`.
@@ -52,10 +62,6 @@
 ### SHERPA_BINARY
 - **Type**: Path
 - **Description**: Path to the Sherpa executable binary.
-
-### RIVET_ENV_SCRIPT
-- **Type**: Path
-- **Description**: Path to the Rivet environment setup script (e.g., `rivetenv.sh`). 
 
 ---
 
@@ -154,3 +160,4 @@
 
 - **Path Expansion**: All path parameters support `~` for home directory expansion and can be relative (expanded relative to the config file location) or absolute.
 - **Event Suffixes**: Event counts accept multipliers: `k` (* 10^3), `M` (* 10^6), `G` (* 10^9).
+- **Examples**: Steering files for different use cases are provided in the `examples/` directory.

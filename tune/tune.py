@@ -214,6 +214,10 @@ def build_state(cfg, config_path: Path):
     if n_dirs not in (1, 2):
         raise ValueError("Provide one or two input directories via INPUT_DIR1[/INPUT_DIR2]")
 
+    pattern = str(cfg.get("PATTERN", "")).strip()
+    if any(bool(b["reweight"]) for b in input_dir_blocks) and not pattern:
+        raise KeyError("Missing required key: PATTERN (required when INPUT_DIRx.REWEIGHTING is on)")
+
     merge_mode = str(cfg.get("MERGE_MODE", "yoda")).strip().lower()
     if merge_mode not in {"yoda", "rivet"}:
         raise ValueError("MERGE_MODE must be 'yoda' or 'rivet'")
@@ -324,6 +328,7 @@ def build_state(cfg, config_path: Path):
         "n_grid"                  : n_grid,
         "surrogate_order"         : surrogate_order,
         "surrogate_order_safe"    : surrogate_order.replace(",", "_"),
+        "pattern"                 : pattern,
         "start_point_survey"      : start_point_survey,
         "restarts"                : restarts,
         "combine_mode"            : combine_mode,
@@ -356,9 +361,17 @@ def dag_jobs(n_dirs: int) -> list[str]:
     jobs.append("P9")
     return jobs
 
+def dag_completed_jobs(phase_times: dict, n_dirs: int) -> set[str]:
+    completed: set[str] = set()
+    for job in dag_jobs(n_dirs):
+        if (phase_times.get(job) or {}).get("end_time"):
+            completed.add(job)
+    return completed
 
 def dag_dependencies(n_dirs: int) -> list[tuple[str, str]]:
     edges: list[tuple[str, str]] = []
+    if n_dirs == 2:
+        edges.append(("P1_dir1", "P1_dir2"))
     for i in range(1, n_dirs + 1):
         edges.extend([
                 (f"P1_dir{i}", f"P2_dir{i}"),
@@ -387,20 +400,9 @@ def dag_dependencies(n_dirs: int) -> list[tuple[str, str]]:
                      ])
     return edges
 
-
-def completed_jobs_from_phase_times(phase_times: dict, n_dirs: int) -> set[str]:
-    completed: set[str] = set()
-    for job in dag_jobs(n_dirs):
-        if (phase_times.get(job) or {}).get("end_time"):
-            completed.add(job)
-    return completed
-
-
-def jobs_to_resume(phase_times: dict, n_dirs: int) -> set[str]:
-    all_jobs = dag_jobs(n_dirs)
-    completed = completed_jobs_from_phase_times(phase_times, n_dirs)
-    include: set[str] = {job for job in all_jobs if job not in completed}
-
+def dag_jobs_to_resume(phase_times: dict, n_dirs: int) -> set[str]:
+    completed_jobs = dag_completed_jobs(phase_times, n_dirs)
+    include: set[str] = {job for job in dag_jobs(n_dirs) if job not in completed_jobs}
     changed = True
     edges = dag_dependencies(n_dirs)
     while changed:
@@ -412,54 +414,41 @@ def jobs_to_resume(phase_times: dict, n_dirs: int) -> set[str]:
     return include
 
 
-def reset_phase_output(state: dict, jobs: set[str]) -> list[Path]:
-    croot = Path(state["condor_output"])
-    recreated: list[Path] = []
-    for job in sorted(jobs):
-        if "_dir" in job:
-            phase, dir_idx = job.split("_dir", 1)
-            target = croot / f"{phase}_dir{dir_idx}"
-        else:
-            target = croot / job
-        if target.exists():
-            shutil.rmtree(target)
-        target.mkdir(parents=True, exist_ok=True)
-        recreated.append(target)
-    return recreated
-
-
-def cleanup_dagman_files(master_dir: Path, dag_path: Path) -> None:
-    base_name = dag_path.name
-    for p in sorted(master_dir.glob(f"{base_name}.rescue*")):
-        if p.is_file():
-            p.unlink()
-    lock_path = master_dir / f"{base_name}.lock"
-    if lock_path.exists() and lock_path.is_file():
-        lock_path.unlink()
-    blocking_files = [
-        f"{base_name}.condor.sub",
-        f"{base_name}.lib.out",
-        f"{base_name}.lib.err",
-        f"{base_name}.dagman.log",
-        f"{base_name}.metrics",
-        f"{base_name}.nodes.log",
-    ]
-    for fname in blocking_files:
-        p = master_dir / fname
-        if p.exists() and p.is_file():
-            p.unlink()
-    for p in sorted(master_dir.glob(f"{base_name}.dagman.out*")):
-        if p.is_file():
-            p.unlink()
-    print(f"Removed existing DAGMan files in {master_dir}")
-    return
-
-
 def handle_resume(current_state: dict) -> tuple[dict, Path, bool, set[str]]:
-    state = current_state
+    state       = current_state
     resume_mode = False
     resume_jobs: set[str] = set()
-    master_dir = Path(state["master_dir"])
+    master_dir  = Path(state["master_dir"])
+
+    def comparable_state(state: dict) -> dict:
+        normalized = json.loads(json.dumps(state))
+        normalized.pop("created_at", None)
+        normalized.pop("dag_cluster_id", None)
+        normalized.pop("config_path", None)
+        normalized.pop("condor_ids_file", None)
+        normalized.pop("phase_times_file", None)
+        normalized.pop("dag_path", None)
+        return normalized
+    
+    def reset_phase_output(state: dict, jobs: set[str]) -> list[Path]:
+        croot = Path(state["condor_output"])
+        for job in sorted(jobs):
+            if "_dir" in job:
+                phase, dir_idx = job.split("_dir", 1)
+                target = croot / f"{phase}_dir{dir_idx}"
+            else:
+                target = croot / job
+            if target.exists():
+                shutil.rmtree(target)
+            target.mkdir(parents=True, exist_ok=True)
+        return
+    
+    def cleanup_dagman_files(master_dir: Path, dag_path: Path) -> None:
+        base_name = dag_path.name
+        for p in sorted(master_dir.glob(f"{base_name}.*")):
+            if p.is_file():
+                p.unlink()
+        return
 
     if master_dir.exists():
         if not master_dir.is_dir():
@@ -476,11 +465,11 @@ def handle_resume(current_state: dict) -> tuple[dict, Path, bool, set[str]]:
             else:
                 if comparable_state(saved_state) == comparable_state(state):
                     n_dirs_saved = len(saved_state["input_dirs"])
-                    resume_jobs_candidate = jobs_to_resume(phase_times, n_dirs_saved)
+                    resume_jobs_candidate = dag_jobs_to_resume(phase_times, n_dirs_saved)
                     if not resume_jobs_candidate:
                         print("Detected existing completed run (all phases have end_time).")
                     else:
-                        completed_jobs = completed_jobs_from_phase_times(phase_times, n_dirs_saved)
+                        completed_jobs = dag_completed_jobs(phase_times, n_dirs_saved)
                         print(f"Detected resumable run in: {master_dir}")
                         print(f"Completed jobs: {len(completed_jobs)} / {len(dag_jobs(n_dirs_saved))}. "
                               f"Will submit remaining jobs: {len(resume_jobs_candidate)}")
@@ -504,21 +493,37 @@ def handle_resume(current_state: dict) -> tuple[dict, Path, bool, set[str]]:
         print(f"Using existing master directory: {master_dir}\n")
         print("Resume mode: keeping existing state, condor IDs, phase times, and outputs.")
         if resume_jobs:
-            recreated = reset_phase_output(state, resume_jobs)
-            print(f"Reset condor output directories for {len(recreated)} uncompleted job(s).")
+            answer = input("Reset existing condor output directories for uncompleted jobs and existing DAGMan files? [y/N]: ").strip().lower()
+            if answer not in {"y", "yes"}:
+                raise SystemExit("Aborted.")
+            reset_phase_output(state, resume_jobs)
             cleanup_dagman_files(master_dir, Path(state["dag_path"]))
     return state, master_dir, resume_mode, resume_jobs
 
 
-def comparable_state(state: dict) -> dict:
-    normalized = json.loads(json.dumps(state))
-    normalized.pop("created_at", None)
-    normalized.pop("dag_cluster_id", None)
-    normalized.pop("config_path", None)
-    normalized.pop("condor_ids_file", None)
-    normalized.pop("phase_times_file", None)
-    normalized.pop("dag_path", None)
-    return normalized
+def cleanup_input_artifacts(state: dict) -> None:
+    input_dirs = [Path(item["path"]) for item in state["input_dirs"]]
+    patterns = ["newscan*", "app_*.json", "err_*.json", "tune.*", "validation", "chi2.json","chi2.plots"]
+    found_artifacts = []
+    for input_dir in input_dirs:
+        for pattern in patterns:
+            for artifact in input_dir.glob(pattern):
+                found_artifacts.append(artifact)
+    if found_artifacts:
+        print("Found existing tune artifacts in input directories:")
+        for artifact in sorted(found_artifacts):
+            print(f"  - {artifact}")
+        print()
+        answer = input("Remove these artifacts before starting fresh tune? [y/N]: ").strip().lower()
+        if answer in {"y", "yes"}:
+            for artifact in found_artifacts:
+                if artifact.is_dir():
+                    shutil.rmtree(artifact)
+                else:
+                    artifact.unlink()
+            print(f"Removed {len(found_artifacts)} artifact(s).\n")
+        else: print("Proceeding without removing artifacts (may cause conflicts).\n")
+    return
 
 
 def create_dag(state, include_jobs: set[str]):
@@ -673,7 +678,6 @@ def main():
             print(f"    {phase} | {label}")
     if resume_mode: print("  - Resuming jobs: " + ", ".join(sorted(resume_jobs)))
     print()
-
     state_path = master_dir / "state.json"
     condor_ids = None
     if not resume_mode:
@@ -686,7 +690,6 @@ def main():
             (condor_output / "P5").mkdir(parents=True, exist_ok=True)
         (condor_output / "P9").mkdir(parents=True, exist_ok=True)
         print(f"Created condor output directories: {condor_output}")
-
         if state["merged_dir"]:
             merged_dir = Path(state["merged_dir"])
             if merged_dir.exists():
@@ -699,7 +702,6 @@ def main():
                 print(f"Created combined reference data JSON:{merged_dir / 'data.json'}")
         state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
         print(f"Created state file: {state_path}")
-
         condor_ids = {"dagman": {"cluster_id": None}}
         for i in range(1, len(state["input_dirs"]) + 1):
             for p in [1, 2, 3, 4, 6, 7, 8]:
@@ -709,10 +711,8 @@ def main():
         condor_ids["P9"] = {"cluster_id": None}
         Path(state["condor_ids_file"]).write_text(json.dumps(condor_ids, indent=2), encoding="utf-8")
         print(f"Created condor IDs file: {state['condor_ids_file']}")
-
         Path(state["phase_times_file"]).write_text("{}\n", encoding="utf-8")
         print(f"Created phase times file: {state['phase_times_file']}")
-
     dag_content = create_dag(state, include_jobs=resume_jobs if resume_mode else set(dag_jobs(len(state["input_dirs"]))))
     dag_path = Path(state["dag_path"])
     dag_path.write_text(dag_content, encoding="utf-8")
@@ -720,15 +720,15 @@ def main():
         print(f"Created DAG file for job-level resume ({len(resume_jobs or set())} jobs): {dag_path}")
     else:
         print(f"Created DAG file: {dag_path}")
-
     print()
+    if not resume_mode: cleanup_input_artifacts(state)
+
     answer = input("Proceed with DAG submission now? [y/N]: ").strip().lower()
     if answer not in {"y", "yes"}:
         print(f"Submission cancelled. You can review generated files in: {master_dir}")
         print(f"Submit manually with: cd {master_dir} && condor_submit_dag {dag_path.name}")
         print(f"\nInitialization complete!")
         return
-
     print(f"Submitting DAG: condor_submit_dag {dag_path.name}")
     proc = subprocess.run(
         ["condor_submit_dag", dag_path.name],

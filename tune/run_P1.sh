@@ -47,5 +47,10 @@ fi
 
 run_cmd "1" "$TAG" bash "$SHERPA_ON_THE_ROCKS_DIR/prepare_runs.sh" "$SPLIT_TARGET" "$N_SUBRUNS"
 
+if [[ ! -f runs.txt ]]; then
+  log_msg "1" "$TAG" "Failed: prepare_runs.sh did not create runs.txt."
+  exit 1
+fi
+
 record_phase_time "$STATE_JSON" "$PHASE_KEY" "end"
 log_msg "1" "$TAG" "Completed successfully."

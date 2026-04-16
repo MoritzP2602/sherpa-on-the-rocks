@@ -1,4 +1,4 @@
-EVENTS: 2k
+EVENTS: 25k
 BEAMS: 2212
 BEAM_ENERGIES: 3500
 
@@ -7,6 +7,7 @@ BATCH_MODE: 3
 
 AMISIC:
   nB_bins: 20
+  MU_R_FACTOR: 0.5
   PT_Min(ref): {PT_Min}
   SIGMA_ND_NORM: {SIGMA_ND_NORM}
 
