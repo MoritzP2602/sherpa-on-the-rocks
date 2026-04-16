@@ -1,8 +1,0 @@
-set(libProc_2_2__d__u__d__u__O2_0__E3_la_SOURCES 
-V.C
-V_Z.C
-)
-add_library(Proc_2_2__d__u__d__u__O2_0__E3SHARED${libProc_2_2__d__u__d__u__O2_0__E3_la_SOURCES})
-amegic_handle_shared_library(Proc_2_2__d__u__d__u__O2_0__E3)
-install(TARGETS Proc_2_2__d__u__d__u__O2_0__E3 DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR})
-

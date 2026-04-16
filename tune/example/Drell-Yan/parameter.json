@@ -1,6 +1,0 @@
-{
-	"MATTER_FRACTION_1": [0.30, 0.70],
-	"MATTER_RADIUS_1":   [0.75, 0.95],
-	"PT_Min":            [2.20, 2.80],
-	"SIGMA_ND_NORM":     [0.80, 1.20]
-}

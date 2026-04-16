@@ -1,8 +1,0 @@
-set(libProc_2_2__d__db__d__db__O2_0__E2_la_SOURCES 
-V.C
-V_Z.C
-)
-add_library(Proc_2_2__d__db__d__db__O2_0__E2SHARED${libProc_2_2__d__db__d__db__O2_0__E2_la_SOURCES})
-amegic_handle_shared_library(Proc_2_2__d__db__d__db__O2_0__E2)
-install(TARGETS Proc_2_2__d__db__d__db__O2_0__E2 DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR})
-

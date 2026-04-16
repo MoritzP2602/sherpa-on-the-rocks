@@ -47,6 +47,7 @@ Tune settings are customized in the steering files (e.g. [config1.yaml](config1.
 From the `example` directory (adjust the paths to the required installations before running):
 
 ```bash
+unzip Drell-Yan.zip
 python3 tune.py config1.yaml
 ```
 
