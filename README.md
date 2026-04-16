@@ -54,7 +54,7 @@ You can make the scripts executable to run them without explicitly calling `bash
 ```bash
 chmod +x ~/sherpa-on-the-rocks/prepare_runs.sh
 chmod +x ~/sherpa-on-the-rocks/yodamerge_runs.sh
-chmod +x ~/sherpa-on-the-rocks/rivetmerge_runs.sh
+chmod +x ~/sherpa-on-the-rocks/rivet-merge_runs.sh
 chmod +x ~/sherpa-on-the-rocks/analyze_runtime.py
 ```
 
@@ -180,7 +180,7 @@ bash ~/sherpa-on-the-rocks/yodamerge_runs.sh <production_dir>
 ```
 or
 ```bash
-bash ~/sherpa-on-the-rocks/rivetmerge_runs.sh <production_dir>
+bash ~/sherpa-on-the-rocks/rivet-merge_runs.sh <production_dir>
 ```
 
 - If `<production_dir>` contains run subdirectories that themselves contain subrun subdirectories, each run subdirectory will get one merged `<run_variantX>.yoda` file.
@@ -210,7 +210,7 @@ python3 ~/sherpa-on-the-rocks/analyze_runtime.py condor_output/job.<cluster>.*
 Note: If you changed the condor output directory, you need to adjust the directory in the command above.
 
 
-This completes a typical Sherpa production cycle on ROCKS: initialize, split into subruns, submit via HTCondor, then merge the resulting YODA files. The scripts `prepare_runs.sh` and `yodamerge_runs.sh`/`rivetmerge_runs.sh` offer additional features. Run them without arguments to see all available options:
+This completes a typical Sherpa production cycle on ROCKS: initialize, split into subruns, submit via HTCondor, then merge the resulting YODA files. The scripts `prepare_runs.sh` and `yodamerge_runs.sh`/`rivet-merge_runs.sh` offer additional features. Run them without arguments to see all available options:
 
 ```bash
 bash ~/sherpa-on-the-rocks/prepare_runs.sh
