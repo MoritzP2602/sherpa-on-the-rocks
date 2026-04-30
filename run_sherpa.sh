@@ -38,6 +38,8 @@ cleanup() {
     echo "Warning: Analysis.yoda.gz not found"
   fi
 
+  cp *.dat "$OUTDIR" 2>/dev/null || echo "No .dat files found"
+
   cp -f "$OUTFILE" "$LOGDIR/job.${CLUSTER}.${PROCESS}.out" 2>/dev/null || true
   cp -f "$ERRFILE" "$LOGDIR/job.${CLUSTER}.${PROCESS}.err" 2>/dev/null || true
 }
