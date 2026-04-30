@@ -109,6 +109,12 @@
 - **Default**: "mpi/openmpi-x86_64"
 - **Description**: HPC module name for MPI environment. This is required for the Apprentice jobs.
 
+### NUMBA_DISABLE_JIT
+- **Type**: Boolean-like string
+- **Default**: `off`
+- **Valid Values**: `on`, `off`, `true`, `false`
+- **Description**: Sets `NUMBA_DISABLE_JIT=1` for phase jobs. This can suppress Numba JIT compilation warnings/errors in Apprentice workflows (especially in P4/P5), at the cost of slower execution.
+
 ### PHASE1_MAXRUNTIME
 - **Type**: Integer (seconds)
 - **Default**: 1800

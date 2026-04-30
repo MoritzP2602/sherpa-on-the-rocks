@@ -195,6 +195,11 @@ load_environment() {
       IFS="$old_ifs"
     fi
   fi
+  if [[ "$NUMBA_DISABLE_JIT" == "1" ]]; then
+    export NUMBA_DISABLE_JIT=1
+  else
+    unset NUMBA_DISABLE_JIT 2>/dev/null || true
+  fi
 }
 
 load_global_state() {
@@ -213,6 +218,7 @@ emit('APP_TOOLS_INSTALLATION', s['app_tools_installation'])
 emit('APPRENTICE_INSTALLATION', s['apprentice_installation'])
 emit('SHERPA_BINARY', s['sherpa_binary'])
 emit('MPI_MODULE', s['mpi_module'])
+emit('NUMBA_DISABLE_JIT', int(bool(s['numba_disable_jit'])))
 emit('MASTER_DIR', s['master_dir'])
 emit('CONDOR_OUTPUT', s['condor_output'])
 emit('N_INPUT_DIRS', len(s['input_dirs']))

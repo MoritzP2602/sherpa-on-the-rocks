@@ -321,6 +321,7 @@ def build_state(cfg, config_path: Path):
         "apprentice_installation" : str(apprentice_installation),
         "sherpa_binary"           : str(sherpa_binary),
         "mpi_module"              : str(cfg.get("MPI_MODULE", "mpi/openmpi-x86_64")).strip(),
+        "numba_disable_jit"       : parse_on_off(cfg.get("NUMBA_DISABLE_JIT", "off"), "NUMBA_DISABLE_JIT"),
         "job_dir"                 : str(job_dir),
         "master_dir"              : str(master_dir),
         "condor_output"           : condor_output,
