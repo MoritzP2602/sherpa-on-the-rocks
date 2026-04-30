@@ -151,7 +151,7 @@ The submit file will create one job per line of `runs.txt`.
 Note: You can only submit runs on the cluster and NOT from your local machine.
 
 
-## 2. Monitoring Jobs
+## 2. Monitoring jobs
 
 List all your running jobs to find their IDs (`<job-id> = <cluster>.<process>`):
 

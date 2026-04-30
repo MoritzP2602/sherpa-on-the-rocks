@@ -8,6 +8,7 @@ This folder contains three example steering files:
 
 These three examples correspond to the three tutorials described in the app-tools wiki.
 
+
 ## Requirements
 
 Before running the script, make sure the following are installed and accessible on ROCKS:
@@ -21,6 +22,17 @@ Before running the script, make sure the following are installed and accessible 
 These are configured in the steering files via `RIVET_ENV_SCRIPT`, `SHERPA_ON_THE_ROCKS_DIR`, `APP_TOOLS_INSTALLATION`, `APPRENTICE_INSTALLATION` and `SHERPA_BINARY`.
 
 For the full list of available steering parameters, see [../PARAMETERS.md](../PARAMETERS.md).
+
+
+## How to start
+
+From the `example` directory (adjust the paths to the required installations before running):
+
+```bash
+unzip Drell-Yan.zip
+python3 tune.py config1.yaml
+```
+
 
 ## What the master script does
 
@@ -42,14 +54,6 @@ Phases:
 
 Tune settings are customized in the steering files (e.g. [config1.yaml](config1.yaml), [config2.yaml](config2.yaml), [config3.yaml](config3.yaml)).
 
-## How to start
-
-From the `example` directory (adjust the paths to the required installations before running):
-
-```bash
-unzip Drell-Yan.zip
-python3 tune.py config1.yaml
-```
 
 ## What the script creates
 
@@ -72,6 +76,7 @@ An extensive summary of the phase outputs can be generated using the `output.py`
 ```bash
 python3 ../output.py MASTER_DIR
 ```
+
 
 ## Debugging and monitoring
 
