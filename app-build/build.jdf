@@ -1,0 +1,13 @@
+Executable  = /bin/bash
+USERNAME    = YOUR_USERNAME
+LOGDIR      = condor_output
+MAXRUNTIME  = 86400
+NEWSCANDIR  = newscan
+ORDER       = 5,0
+arguments   = /home/$(USERNAME)/sherpa-on-the-rocks/app-build/run_app-build.sh $(file) $(NEWSCANDIR) $(ORDER) $(LOGDIR) $(Cluster) $(Process) $(MAXRUNTIME)
++MaxRuntime = $(MAXRUNTIME)
+max_idle    = 1000
+
+Log         = $(LOGDIR)/job.$(Cluster).$(Process).log
+
+Queue file from files.txt
