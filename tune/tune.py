@@ -108,7 +108,7 @@ def phase_overview(state):
                 ("P7", "Sherpa event generation for validation grid"),
                 ("P8", "Merge validation results using yodamerge/rivet-merge"),
                   ])
-    phases.append(("P9", "Compute and plot chi-squared values."))
+    phases.append(("P9", "Compute and plot chi-squared values"))
     return phases
 
 
