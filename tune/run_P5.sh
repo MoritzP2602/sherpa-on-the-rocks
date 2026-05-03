@@ -40,7 +40,7 @@ TUNE1_ERR="$DIR1/tune.err.${SURROGATE_ORDER_SAFE}.dir1"
 TUNE2_ERR="$DIR2/tune.err.${SURROGATE_ORDER_SAFE}.dir2"
 
 if [[ "$COMBINE_MODE" == "weighted" ]]; then
-  run_cmd "5" "$TAG" app-tools-combine_weights "$DIR1/weights.txt" "$TUNE1" "$DIR2/weights.txt" "$TUNE2" -o "$MERGED_DIR/weights.txt"
+  run_cmd "5" "$TAG" app-tools-combine_weights "$DIR1/weights.txt" "$TUNE1"     "$DIR2/weights.txt" "$TUNE2"     -o "$MERGED_DIR/weights.txt"
   run_cmd "5" "$TAG" app-tools-combine_weights "$DIR1/weights.txt" "$TUNE1_ERR" "$DIR2/weights.txt" "$TUNE2_ERR" -o "$MERGED_DIR/weights.err.txt"
 else
   run_cmd "5" "$TAG" app-tools-combine_weights "$DIR1/weights.txt" 1.0 "$DIR2/weights.txt" 1.0 -o "$MERGED_DIR/weights.txt"
