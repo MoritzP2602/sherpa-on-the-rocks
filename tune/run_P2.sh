@@ -61,10 +61,10 @@ get_last_event_count() {
 }
 
 cleanup() {
-  if [[ "${CLEANUP_DONE:-0}" -eq 1 ]]; then
+  if [[ "${OUTER_CLEANUP_DONE:-0}" -eq 1 ]]; then
     return
   fi
-  CLEANUP_DONE=1
+  OUTER_CLEANUP_DONE=1
   echo ""
   if [[ -f "$TMPDIR/Analysis.yoda.gz" && -d "$OUTDIR" ]]; then
     if cp -f "$TMPDIR/Analysis.yoda.gz" "$OUTDIR/$YODA" 2>/dev/null; then
