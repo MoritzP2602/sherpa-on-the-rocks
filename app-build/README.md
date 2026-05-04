@@ -1,4 +1,4 @@
-# app-build on HTCondor (with app-tools)
+# app-build on ROCKS (with app-tools)
 
 This directory provides files for running app-build jobs on the ROCKS cluster. An installation of `app-tools` (https://github.com/MoritzP2602/app-tools) and `apprentice` is required.
 

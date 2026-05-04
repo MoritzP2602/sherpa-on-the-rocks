@@ -30,7 +30,7 @@ From the `example` directory (adjust the paths to the required installations bef
 
 ```bash
 unzip Drell-Yan.zip
-python3 tune.py config1.yaml
+python3 ../tune.py config1.yaml
 ```
 
 
