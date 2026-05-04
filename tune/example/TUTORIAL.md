@@ -2,11 +2,11 @@
 
 This folder contains three example steering files:
 
-- [config1.yaml](config1.yaml)
-- [config2.yaml](config2.yaml)
-- [config3.yaml](config3.yaml)
+- `config1.yaml`
+- `config2.yaml`
+- `config3.yaml`
 
-These three examples correspond to the three tutorials described in the app-tools wiki.
+These three examples correspond to the three tutorials described in the app-tools wiki (https://github.com/MoritzP2602/app-tools/wiki/Tutorials).
 
 
 ## Requirements
@@ -21,7 +21,7 @@ Before running the script, make sure the following are installed and accessible 
 
 These are configured in the steering files via `RIVET_ENV_SCRIPT`, `SHERPA_ON_THE_ROCKS_DIR`, `APP_TOOLS_INSTALLATION`, `APPRENTICE_INSTALLATION` and `SHERPA_BINARY`.
 
-For the full list of available steering parameters, see [../PARAMETERS.md](../PARAMETERS.md).
+For the full list of available steering parameters, see `../PARAMETERS.md`.
 
 
 ## How to start
@@ -36,7 +36,7 @@ python3 ../tune.py config1.yaml
 
 ## What the master script does
 
-The master script [../tune.py](../tune.py) runs the complete tuning workflow described in app-tools automatically.
+The master script `../tune.py` runs the complete tuning workflow described in app-tools automatically.
 
 It creates and submits an HTCondor DAG (DAGMan), where each phase is a DAG job stage with the correct dependencies.
 
@@ -52,7 +52,7 @@ Phases:
 - **P8**: merge validation outputs
 - **P9**: compute and plot chi2
 
-Tune settings are customized in the steering files (e.g. [config1.yaml](config1.yaml), [config2.yaml](config2.yaml), [config3.yaml](config3.yaml)).
+Tune settings are customized in the steering files (e.g. `config1.yaml`, `config2.yaml`, `config3.yaml`).
 
 
 ## What the script creates
