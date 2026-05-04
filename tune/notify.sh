@@ -52,13 +52,16 @@ if [[ "$PHASE_KEY" == "init" ]]; then
   BODY="Tune workflow started.
 
 DAGMan cluster ID : ${DAG_CLUSTER_ID:-unknown}
-Submitted at      : $(date)
-Config            : ${CONFIG_PATH}
+Submitted at : $(date)
+Config : ${CONFIG_PATH}
 "
-  printf '%s\n' "$BODY" | mail \
-    -s "$SUBJECT_BASE" \
-    -C "Message-ID: ${MSG_ID}" \
-    "$EMAIL" >/dev/null 2>&1
+  {
+    printf 'To: %s\n' "$EMAIL"
+    printf 'Subject: %s\n' "$SUBJECT_BASE"
+    printf 'Message-ID: %s\n' "$MSG_ID"
+    printf '\n'
+    printf '%s\n' "$BODY"
+  } | mail -t >/dev/null 2>&1
 else
   LOG_DIR="${CONDOR_OUTPUT}/${PHASE_KEY}"
 
@@ -83,9 +86,12 @@ else
 --- Output ---
 ${OUTPUT}"
 
-  printf '%s\n' "$BODY" | mail \
-    -s "RE: $SUBJECT_BASE" \
-    -C "In-Reply-To: ${MSG_ID}" \
-    -C "References: ${MSG_ID}" \
-    "$EMAIL" >/dev/null 2>&1
+  {
+    printf 'To: %s\n' "$EMAIL"
+    printf 'Subject: RE: %s\n' "$SUBJECT_BASE"
+    printf 'In-Reply-To: %s\n' "$MSG_ID"
+    printf 'References: %s\n' "$MSG_ID"
+    printf '\n'
+    printf '%s\n' "$BODY"
+  } | mail -t >/dev/null 2>&1
 fi
