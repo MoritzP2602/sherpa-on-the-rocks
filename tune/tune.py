@@ -322,6 +322,7 @@ def build_state(cfg, config_path: Path):
         "sherpa_binary"           : str(sherpa_binary),
         "mpi_module"              : str(cfg.get("MPI_MODULE", "mpi/openmpi-x86_64")).strip(),
         "numba_disable_jit"       : parse_on_off(cfg.get("NUMBA_DISABLE_JIT", "off"), "NUMBA_DISABLE_JIT"),
+        "email"                   : str(cfg.get("EMAIL", "")).strip(),
         "job_dir"                 : str(job_dir),
         "master_dir"              : str(master_dir),
         "condor_output"           : condor_output,
@@ -429,6 +430,7 @@ def handle_resume(current_state: dict) -> tuple[dict, Path, bool, set[str]]:
         normalized.pop("condor_ids_file", None)
         normalized.pop("phase_times_file", None)
         normalized.pop("dag_path", None)
+        normalized.pop("email", None)
         return normalized
     
     def reset_phase_output(state: dict, jobs: set[str]) -> list[Path]:
@@ -621,13 +623,34 @@ def create_dag(state, include_jobs: set[str]):
                  "STATE_JSON"    : state_path,
                  "PHASE_LOG_DIR" : str(croot / f"P9"),
                  "MAXRUNTIME"    : str(state["P9_maxruntime"])})
+    notify_script = str((job_dir / "notify.sh").resolve())
+    email = state.get("email", "") or ""
     for i in range(1, n_dirs + 1):
         if include_job(f"P2_dir{i}"):
             lines.append(f"RETRY P2_dir{i} 0")
-            lines.append(f"SCRIPT POST P2_dir{i} /bin/true")
+            if email:
+                lines.append(f"SCRIPT POST P2_dir{i} /bin/bash {notify_script} {state_path} P2_dir{i} $RETURN")
+            else:
+                lines.append(f"SCRIPT POST P2_dir{i} /bin/true")
         if include_job(f"P7_dir{i}"):
             lines.append(f"RETRY P7_dir{i} 0")
-            lines.append(f"SCRIPT POST P7_dir{i} /bin/true")
+            if email:
+                lines.append(f"SCRIPT POST P7_dir{i} /bin/bash {notify_script} {state_path} P7_dir{i} $RETURN")
+            else:
+                lines.append(f"SCRIPT POST P7_dir{i} /bin/true")
+    if email:
+        first_job = next((j for j in dag_jobs(n_dirs) if include_job(j)), None)
+        if first_job:
+            lines.append(f"SCRIPT PRE {first_job} /bin/bash {notify_script} {state_path} init 0")
+        for i in range(1, n_dirs + 1):
+            for phase in ["P1", "P3", "P4", "P6", "P8"]:
+                job = f"{phase}_dir{i}"
+                if include_job(job):
+                    lines.append(f"SCRIPT POST {job} /bin/bash {notify_script} {state_path} {job} $RETURN")
+        if n_dirs == 2 and include_job("P5"):
+            lines.append(f"SCRIPT POST P5 /bin/bash {notify_script} {state_path} P5 $RETURN")
+        if include_job("P9"):
+            lines.append(f"SCRIPT POST P9 /bin/bash {notify_script} {state_path} P9 $RETURN")
     for parent, child in dag_dependencies(n_dirs):
         if include_job(parent) and include_job(child):
             lines.append(f"PARENT {parent} CHILD {child}")
@@ -667,6 +690,8 @@ def main():
     print(f"  - app-tools installation: {state.get('app_tools_installation', '<unset>')}")
     print(f"  - Apprentice installation: {state.get('apprentice_installation', '<unset>')}")
     print(f"  - Rivet environment script: {state['rivet_env_script']}")
+    if state.get("email"):
+        print(f"  - Email notifications: {state['email']}")
     if grid_warning:
         print()
         print(grid_warning)
@@ -700,7 +725,7 @@ def main():
             if len(state["input_dirs"]) == 2:
                 input_dir_paths = [Path(item["path"]) for item in state["input_dirs"]]
                 write_stacked_json_values(input_dir_paths, merged_dir)
-                print(f"Created combined reference data JSON:{merged_dir / 'data.json'}")
+                print(f"Created combined reference data JSON: {merged_dir / 'data.json'}")
         state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
         print(f"Created state file: {state_path}")
         condor_ids = {"dagman": {"cluster_id": None}}

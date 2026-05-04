@@ -29,9 +29,11 @@ if [[ -n "$PHASE_LOG_DIR" ]]; then
   PHASE_LOG_DIR=$(realpath "$PHASE_LOG_DIR")
   STATUS_LOG="$PHASE_LOG_DIR/overview.${CLUSTER}.log"
 fi
+cleanup_tmp_logging() { :; }
 if [[ -n "$PHASE_LOG_DIR" && -n "$CLUSTER" && -n "$PROCESS" ]]; then
   setup_tmp_logging "$PHASE_LOG_DIR" "$CLUSTER" "$PROCESS"
 fi
+OUTFILE="${TMP_LOG_OUT:-}"
 if [[ -n "$STATE_JSON" && -n "$DIR_INDEX" ]]; then
   record_phase_time "$STATE_JSON" "${PHASE_KEY}_dir${DIR_INDEX}" "start"
   if [[ -n "$CLUSTER" ]]; then
@@ -135,7 +137,7 @@ echo "INTEGRATION_RESULTS : $INTEGRATION_RESULTS"
 echo "YAML                : $YAML"
 echo "YODA                : $YODA"
 echo "OUTDIR              : $OUTDIR"
-echo "PHASE_LOG_DIR              : $PHASE_LOG_DIR"
+echo "PHASE_LOG_DIR       : $PHASE_LOG_DIR"
 echo "SEED                : $SEED"
 echo "MAXRUNTIME          : $MAXRUNTIME seconds"
 echo ""

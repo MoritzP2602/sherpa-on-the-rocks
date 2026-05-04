@@ -25,8 +25,8 @@ fi
 load_global_state "$STATE_JSON"
 
 for idx in $(seq 1 "$N_INPUT_DIRS"); do
-  eval "DIR_PATH=\$INPUT_DIR_${idx}"
-  eval "WEIGHTS=\$WEIGHTS_${idx}"
+  var="INPUT_DIR_${idx}"; DIR_PATH="${!var}"
+  var="WEIGHTS_${idx}"; WEIGHTS="${!var}"
 
   if command -v app-tools-compute_chi2 >/dev/null 2>&1; then
     run_cmd "9" "$TAG" bash -lc "cd '$DIR_PATH' && app-tools-compute_chi2 validation --weights '$WEIGHTS' --tags 'tune' --depth 1"
