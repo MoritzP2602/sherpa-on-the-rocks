@@ -198,13 +198,13 @@ Note: If you run this command on your local machine, you need to adjust the path
 The output of all runs is stored in `condor_output` per default. You can generate a summary (avg., min., max.) of the runtime for all different runcards by running:
 
 ```bash
-python3 ~/sherpa-on-the-rocks/analyze_runtime.py condor_output
+python3 ~/sherpa-on-the-rocks/runtime.py condor_output
 ```
 
 To generate this overview only for specific batch, use:
 
 ```bash
-python3 ~/sherpa-on-the-rocks/analyze_runtime.py condor_output/job.<cluster>.*
+python3 ~/sherpa-on-the-rocks/runtime.py condor_output/job.<cluster>.*
 ```
 
 Note: If you changed the condor output directory, you need to adjust the directory in the command above.
