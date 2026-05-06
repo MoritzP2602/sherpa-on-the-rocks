@@ -31,7 +31,7 @@ if [[ -z "$EMAIL" ]]; then
   exit 0
 fi
 
-SUBJECT_BASE="Tune ${DAG_CLUSTER_ID:-unknown}"
+SUBJECT_BASE="TUNE - ${DAG_CLUSTER_ID:-unknown}"
 MSG_ID="<tune.${DAG_CLUSTER_ID:-unknown}@$(hostname -s 2>/dev/null || echo 'rocks')>"
 
 MAX_BYTES=102400
