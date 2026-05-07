@@ -11,11 +11,26 @@ while [ $# -gt 0 ]; do
         --rm)
             REMOVE_SUBDIRS=true; shift ;;
         --chunked)
-            CHUNK_SIZE="$2"; shift 2 ;;
+            shift
+            if [ -z "${1-}" ] || ! [[ "$1" =~ ^[0-9]+$ ]]; then
+                echo "--chunked requires a non-negative integer argument" >&2
+                exit 1
+            fi
+            CHUNK_SIZE="$1"; shift ;;
         --nmax)
-            NMAX="$2"; shift 2 ;;
+            shift
+            if [ -z "${1-}" ] || ! [[ "$1" =~ ^-?[0-9]+$ ]]; then
+                echo "--nmax requires an integer argument" >&2
+                exit 1
+            fi
+            NMAX="$1"; shift ;;
         --output|-o)
-            OUTPUT_DIR="${2%/}"; shift 2 ;;
+            shift
+            if [ -z "${1-}" ]; then
+                echo "--output|-o requires a directory argument" >&2
+                exit 1
+            fi
+            OUTPUT_DIR="${1%/}"; shift ;;
         *) POSITIONAL+=("$1"); shift ;;
     esac
 done
@@ -44,14 +59,16 @@ FOLDERS=()
 NPROC=4
 NPROC_USER_SET=false
 
-for arg in "$@"; do
-    if is_number "$arg" && [ "$arg" = "${@: -1}" ]; then
-        NPROC="$arg"
+if [ $# -gt 0 ]; then
+    last_arg="${!#}"
+    if is_number "$last_arg"; then
+        NPROC="$last_arg"
         NPROC_USER_SET=true
+        FOLDERS=("${@:1:$#-1}")
     else
-        FOLDERS+=("$arg")
+        FOLDERS=("$@")
     fi
-done
+fi
 
 if ! is_number "$NPROC" || [ "$NPROC" -lt 1 ]; then
     echo "Error: nproc must be a positive integer (>= 1)."
@@ -194,10 +211,24 @@ merge_chunked() {
 
         local temp_dir="$dir/.yodamerge_tmp"
         mkdir -p "$temp_dir"
-        
-        trap "rm -rf '$temp_dir'" EXIT INT TERM
+
+        local quoted_temp_dir
+        printf -v quoted_temp_dir '%q' "$temp_dir"
+        trap "rm -rf $quoted_temp_dir" EXIT INT TERM
         local chunk_num=0
-        
+        local chunk_pids=()
+        local chunk_failed=0
+
+        wait_batch() {
+            local pid
+            for pid in "${chunk_pids[@]}"; do
+                if ! wait "$pid"; then
+                    chunk_failed=1
+                fi
+            done
+            chunk_pids=()
+        }
+
         echo "Processing chunks in parallel batches of $chunk_parallel..."
         for ((i=0; i<total_files; i+=CHUNK_SIZE)); do
             local chunk_files=("${files[@]:i:CHUNK_SIZE}")
@@ -206,21 +237,36 @@ merge_chunked() {
                 echo "Merging chunk $chunk_num (${#chunk_files[@]} files) -> $(basename "$temp_file")"
                 yodamerge "${chunk_files[@]}" -o "$temp_file"
             ) &
-            
+            chunk_pids+=($!)
+
             chunk_num=$((chunk_num + 1))
-            
+
             if (( chunk_num % chunk_parallel == 0 )); then
                 echo "Waiting for batch to complete..."
-                wait
+                wait_batch
             fi
         done
-        
+
         echo "Waiting for final batch to complete..."
-        wait
+        wait_batch
+
+        if [ "$chunk_failed" -ne 0 ]; then
+            echo "Error: one or more chunk merges failed, aborting."
+            rm -rf "$temp_dir"
+            trap - EXIT INT TERM
+            return 1
+        fi
 
         echo "Merging $chunk_num temporary files into final output..."
         mapfile -t temp_files < <(find "$temp_dir" -name "chunk_*.yoda" | sort)
-        
+
+        if [ "${#temp_files[@]}" -eq 0 ]; then
+            echo "Error: no chunk files produced, aborting."
+            rm -rf "$temp_dir"
+            trap - EXIT INT TERM
+            return 1
+        fi
+
         if yodamerge "${temp_files[@]}" -o "$outfile"; then
             echo "Cleaning up temporary files..."
             rm -rf "$temp_dir"

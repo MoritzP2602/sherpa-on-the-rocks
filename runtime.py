@@ -31,7 +31,7 @@ def main(paths):
             base_path = os.path.dirname(first_file_dir)
         else:
             base_path = os.getcwd()
-    base_path =  base_path.split("/")[-1]
+    base_path = base_path.split("/")[-1]
     
     total_files = len(files)
     for idx, filepath in enumerate(files, 1):
@@ -47,20 +47,21 @@ def main(paths):
         yaml_path = yaml_match.group(1).strip()
 
         # Extract number of events
+        event_lines = re.findall(r'Event\s+(\d+)\s+\(\s*(\d+)\s*s\s+total\s*\)', content)
         events_match = re.search(r'Generated events:\s*(\d+)', content)
         if not events_match:
-            events_match = re.search(r'Event\s+(\d+)\s+\(\s*(\d+)\s*s\s+total\s*\)', content)
-            if not events_match:
+            if not event_lines:
                 continue
-            events = int(events_match.group(1))
+            events = int(event_lines[-1][0])
+            time_no_init = int(event_lines[-1][1])
+            if events == 0:
+                continue
 
-            time_no_init = int(events_match.group(2))
-            
             yaml_stats[yaml_path]['events'] += events
             yaml_stats[yaml_path]['time_no_init'] += time_no_init
             yaml_stats[yaml_path]['events_no_init'] += events
             yaml_stats[yaml_path]['runs'] += 1
-            
+
             time_no_init_per_1M = (time_no_init / events) * 1e6 / 3600.0
             yaml_stats[yaml_path]['run_times_no_init_per_1M'].append(time_no_init_per_1M)
             continue
@@ -76,10 +77,9 @@ def main(paths):
             time_per_1M = (elapsed / events) * 1e6 / 3600.0
             yaml_stats[yaml_path]['run_times_per_1M'].append(time_per_1M)
         
-        # Extract time without initialization (from Event line)
-        event_time_match = re.search(r'Event\s+\d+\s+\(\s*(\d+)\s*s\s+total\s*\)', content)
-        if event_time_match:
-            time_no_init = int(event_time_match.group(1))
+        # Extract time without initialization (from last Event line)
+        if event_lines and events > 0:
+            time_no_init = int(event_lines[-1][1])
             yaml_stats[yaml_path]['time_no_init'] += time_no_init
             yaml_stats[yaml_path]['events_no_init'] += events
             time_no_init_per_1M = (time_no_init / events) * 1e6 / 3600.0
@@ -115,12 +115,15 @@ def main(paths):
             time_no_init_str = f"{'---':>16}"
         
         yaml_dir = os.path.dirname(yaml)
-        
-        if len(yaml_dir.split(base_path)) > 2:
-            if len(warning_msg) == 0:
-                warning_msg += "Warning: YAML path contains base path multiple times, uses first occurrence for output path splitting.\n"
-            warning_msg += "YAML path: " + yaml_dir + ", base path: " + base_path + "\n"          
-        short_dir = yaml_dir.split(base_path, 1)[1].strip('/')
+
+        if base_path and base_path in yaml_dir:
+            if len(yaml_dir.split(base_path)) > 2:
+                if len(warning_msg) == 0:
+                    warning_msg += "Warning: YAML path contains base path multiple times, uses first occurrence for output path splitting.\n"
+                warning_msg += "YAML path: " + yaml_dir + ", base path: " + base_path + "\n"
+            short_dir = yaml_dir.split(base_path, 1)[1].strip('/')
+        else:
+            short_dir = yaml_dir
         
         print(f"{short_dir:40} {time_str} {min_str} {max_str} {time_no_init_str} {stats['events']:15d} {stats['runs']:5d}")
     print('-'*122)
@@ -129,6 +132,6 @@ def main(paths):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python3 analyze_runtime.py <folder> OR python3 timing.py <file1> [<file2> ...]")
+        print("Usage: python3 runtime.py <folder> OR python3 runtime.py <file1> [<file2> ...]")
         sys.exit(1)
     main(sys.argv[1:])

@@ -229,7 +229,7 @@ process_folder() {
             fi
 
             for ((j=0; j<n; j++)); do
-                sub_dir=$(printf "$dir/%0${width}d" "$j")
+                sub_dir=$(printf "%s/%0${width}d" "$dir" "$j")
                 if [ -d "$sub_dir" ]; then
                     echo "Skipping existing: $sub_dir"
                 else
