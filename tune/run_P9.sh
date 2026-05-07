@@ -29,12 +29,18 @@ for idx in $(seq 1 "$N_INPUT_DIRS"); do
   var="WEIGHTS_${idx}"; WEIGHTS="${!var}"
 
   if command -v app-tools-compute_chi2 >/dev/null 2>&1; then
-    run_cmd "9" "$TAG" bash -lc "cd '$DIR_PATH' && app-tools-compute_chi2 validation --weights '$WEIGHTS' --tags 'tune' --depth 1"
+    (
+      cd "$DIR_PATH"
+      run_cmd "9" "$TAG" app-tools-compute_chi2 validation --weights "$WEIGHTS" --tags "tune" --depth 1
+    )
   else
     log_msg "9" "$TAG" "ERROR: app-tools-compute_chi2 not found."
     exit 1
   fi
-  run_cmd "9" "$TAG" bash -lc "cd '$DIR_PATH' && app-tools-plot_chi2 chi2.json"
+  (
+    cd "$DIR_PATH"
+    run_cmd "9" "$TAG" app-tools-plot_chi2 chi2.json
+  )
 done
 
 python3 - "$STATE_JSON" <<'PY'
