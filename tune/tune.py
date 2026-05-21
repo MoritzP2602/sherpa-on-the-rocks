@@ -90,7 +90,7 @@ def write_stacked_json_values(input_dirs: list[Path], merged_dir: Path) -> None:
     target_path.write_text(json.dumps(stacked, indent=2), encoding="utf-8")
 
 
-def phase_overview(state):
+def get_phase_overview(state):
     n_dirs = len(state["input_dirs"])
     phases = []
     phases.extend([
@@ -102,14 +102,25 @@ def phase_overview(state):
     if n_dirs == 1: 
         phases.append(("P5", "SKIPPED"))
     else: 
-        phases.append(("P5", "Combine results from different processes and repeat the tuning procedure"))
+        phases.append(("P5", "Combine results from different processes and repeat tuning"))
     phases.extend([
-                ("P6", "Create validation grid from tune results and prepare Sherpa subruns"),
+                ("P6", "Create validation grid from tune results and prepare subruns"),
                 ("P7", "Sherpa event generation for validation grid"),
                 ("P8", "Merge validation results using yodamerge/rivet-merge"),
                   ])
     phases.append(("P9", "Compute and plot chi-squared values"))
     return phases
+
+
+def check_mpi_module_available(module_name: str) -> bool:
+    script = ('[ -f /etc/profile.d/modules.sh ] && . /etc/profile.d/modules.sh 2>/dev/null; '
+              '[ -f /usr/share/Modules/init/bash ] && . /usr/share/Modules/init/bash 2>/dev/null; '
+              'command -v module >/dev/null 2>&1 || exit 1; '
+              'module load "$1" >/dev/null 2>&1')
+    try:
+        r = subprocess.run(["bash", "-c", script, "_", module_name], capture_output=True, timeout=10)
+        return r.returncode == 0
+    except Exception: return False
 
 
 def get_n_parameters(parameter_json_path: Path) -> int:
@@ -194,16 +205,14 @@ def parse_input_dir_blocks(cfg, config_path: Path):
 
 
 def build_state(cfg, config_path: Path):
-    required_keys = [
-        "INPUT_DIR1",
-        "N_GRID",
-        "SURROGATE_ORDER",
-        "SHERPA_ON_THE_ROCKS_DIR",
-        "APP_TOOLS_INSTALLATION",
-        "APPRENTICE_INSTALLATION",
-        "SHERPA_BINARY",
-        "RIVET_ENV_SCRIPT",
-    ]
+    required_keys = ["INPUT_DIR1",
+                     "N_GRID",
+                     "SURROGATE_ORDER",
+                     "SHERPA_ON_THE_ROCKS_DIR",
+                     "APP_TOOLS_INSTALLATION",
+                     "APPRENTICE_INSTALLATION",
+                     "SHERPA_BINARY",
+                     "RIVET_ENV_SCRIPT"]
     for key in required_keys:
         if key not in cfg:
             raise KeyError(f"Missing required key: {key}")
@@ -662,7 +671,7 @@ def main():
     parser.add_argument("config", help="Path to YAML steering file")
     args = parser.parse_args()
 
-    print("Starting Initialisation...\n")
+    print("Starting initialisation...\n")
 
     config_path = Path(os.path.expanduser(args.config)).resolve()
     if not config_path.exists():
@@ -675,71 +684,105 @@ def main():
     state, grid_warning = build_state(cfg, config_path)
     state, master_dir, resume_mode, resume_jobs = handle_resume(state)
 
-    print("Overview:")
-    print(f"  - Input directories:")
-    for idx, item in enumerate(state['input_dirs'], start=1):
-        output = f"      Input {idx}: {item['path']} | grid = {item['grid_mode']} | "
-        if item['reweight']:
-            output += "reweighting = on | "
-        output += f"subruns = {item['n_subruns']} | "
-        if item['validation_reweight']:
-            output += "validation reweighting = on | "
-        output += f"validation subruns = {item['n_val_subruns']}"
-        print(output)
-    print(f"  - Sherpa binary: {state.get('sherpa_binary', '<unset>')}")
-    print(f"  - app-tools installation: {state.get('app_tools_installation', '<unset>')}")
-    print(f"  - Apprentice installation: {state.get('apprentice_installation', '<unset>')}")
-    print(f"  - Rivet environment script: {state['rivet_env_script']}")
+    print("Overview:\n")
+
+    mpi_module = state.get("mpi_module", "")
+    mpi_available = check_mpi_module_available(mpi_module) if mpi_module else False
+    mpi_status = "available" if mpi_available else "NOT available"
+    general_rows = [("Sherpa binary",             state.get("sherpa_binary", "<unset>")),
+                    ("app-tools installation",    state.get("app_tools_installation", "<unset>")),
+                    ("Apprentice installation",   state.get("apprentice_installation", "<unset>")),
+                    ("Rivet environment script",  state.get("rivet_env_script", "<unset>")),
+                    ("MPI module",                f"{mpi_module} ({mpi_status})")]
     if state.get("email"):
-        print(f"  - Email notifications: {state['email']}")
-    if grid_warning:
-        print()
-        print(grid_warning)
+        general_rows.append(("Email notifications", state["email"]))
+    gw = max(len(k) for k, _ in general_rows)
+    print("  General settings:")
+    for k, v in general_rows:
+        print(f"    - {k:<{gw}} : {v}")
     print()
-    print("  - Phases:")
-    for phase, label in phase_overview(state):
-        if phase != "P5": 
-            print(f"    {phase} | {label} (maxruntime = {state.get(f'{phase}_maxruntime', 'n/a')})")
-        else: 
-            print(f"    {phase} | {label}")
+
+    print("  Input directories:")
+    n_dirs = len(state["input_dirs"])
+    for idx, item in enumerate(state["input_dirs"], start=1):
+        dir_rows = [("grid mode",              item["grid_mode"]),
+                    ("reweighting",            "on" if item["reweight"] else "off"),
+                    ("subruns",                item["n_subruns"]),
+                    ("validation reweighting", "on" if item["validation_reweight"] else "off"),
+                    ("validation subruns",     item["n_val_subruns"])]
+        dw = max(len(k) for k, _ in dir_rows)
+        print(f"    Input {idx}: {item['path']}")
+        for k, v in dir_rows:
+            print(f"      - {k:<{dw}} : {v}")
+    print()
+
+    print("  Apprentice settings:")
+    appbuild_rows = [("SURROGATE_ORDER", state["surrogate_order"])]
+    if any(d["reweight"] for d in state["input_dirs"]):
+        appbuild_rows.append(("PATTERN (split_reweighting.py)", state["pattern"]))
+    apptune_rows = [("START_POINT_SURVEY", state["start_point_survey"]),
+                    ("RESTARTS",           state["restarts"])]
+    if n_dirs == 2:
+        apptune_rows.append(("COMBINE_MODE (combine_weights.py)", state["combine_mode"]))
+    aw = max(len(k) for k, _ in appbuild_rows + apptune_rows)
+    print("    app-build:")
+    for k, v in appbuild_rows:
+        print(f"      - {k:<{aw}} : {v}")
+    print("    app-tune2:")
+    for k, v in apptune_rows:
+        print(f"      - {k:<{aw}} : {v}")
+    print()
+    if grid_warning:
+        print(grid_warning)
+        print()
+
+    print("  Phases:")
+    phase_overview = get_phase_overview(state)
+    aw = max(len(label) for _, label in phase_overview)
+    for phase, label in phase_overview:
+        if label == "SKIPPED":
+            print(f"    {phase} | {label:<{aw}} |")
+        else:
+            maxruntime = f"maxruntime = {state.get(f'{phase}_maxruntime', 'n/a')}"
+            print(f"    {phase} | {label:<{aw}} | {maxruntime}")
     if resume_mode: print("  - Resuming jobs: " + ", ".join(sorted(resume_jobs)))
     print()
+
     state_path = master_dir / "state.json"
-    condor_ids = None
     if not resume_mode:
+        n_dirs = len(state["input_dirs"])
+        jobs = dag_jobs(n_dirs)
+
         condor_output = Path(state["condor_output"])
         condor_output.mkdir(parents=True, exist_ok=True)
-        for phase in ["P1", "P2", "P3", "P4", "P6", "P7", "P8"]:
-            for i in range(1, len(state["input_dirs"]) + 1):
-                (condor_output / f"{phase}_dir{i}").mkdir(parents=True, exist_ok=True)
-        if len(state["input_dirs"]) == 2:
-            (condor_output / "P5").mkdir(parents=True, exist_ok=True)
-        (condor_output / "P9").mkdir(parents=True, exist_ok=True)
+        for job in jobs:
+            (condor_output / job).mkdir(parents=True, exist_ok=True)
         print(f"Created condor output directories: {condor_output}")
+
         if state["merged_dir"]:
             merged_dir = Path(state["merged_dir"])
             if merged_dir.exists():
                 raise SystemExit(f"Merged directory already exists: {merged_dir}")
             merged_dir.mkdir(parents=True, exist_ok=False)
             print(f"Created merged directory: {merged_dir}")
-            if len(state["input_dirs"]) == 2:
-                input_dir_paths = [Path(item["path"]) for item in state["input_dirs"]]
-                write_stacked_json_values(input_dir_paths, merged_dir)
-                print(f"Created combined reference data JSON: {merged_dir / 'data.json'}")
+            input_dir_paths = [Path(item["path"]) for item in state["input_dirs"]]
+            write_stacked_json_values(input_dir_paths, merged_dir)
+            print(f"Created combined reference data JSON: {merged_dir / 'data.json'}")
+
         state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
         print(f"Created state file: {state_path}")
+
         condor_ids = {"dagman": {"cluster_id": None}}
-        for i in range(1, len(state["input_dirs"]) + 1):
-            for p in [1, 2, 3, 4, 6, 7, 8]:
-                condor_ids[f"P{p}_dir{i}"] = {"cluster_id": None}
-        if len(state["input_dirs"]) == 2:
-            condor_ids["P5"] = {"cluster_id": None}
-        condor_ids["P9"] = {"cluster_id": None}
+        for job in jobs:
+            condor_ids[job] = {"cluster_id": None}
         Path(state["condor_ids_file"]).write_text(json.dumps(condor_ids, indent=2), encoding="utf-8")
         print(f"Created condor IDs file: {state['condor_ids_file']}")
+
         Path(state["phase_times_file"]).write_text("{}\n", encoding="utf-8")
         print(f"Created phase times file: {state['phase_times_file']}")
-    dag_content = create_dag(state, include_jobs=resume_jobs if resume_mode else set(dag_jobs(len(state["input_dirs"]))))
+
+    dag_content = create_dag(state,
+        include_jobs=resume_jobs if resume_mode else set(dag_jobs(len(state["input_dirs"]))))
     dag_path = Path(state["dag_path"])
     dag_path.write_text(dag_content, encoding="utf-8")
     if resume_mode:
@@ -747,7 +790,8 @@ def main():
     else:
         print(f"Created DAG file: {dag_path}")
     print()
-    if not resume_mode: cleanup_input_artifacts(state)
+    if not resume_mode:
+        cleanup_input_artifacts(state)
 
     answer = input("Proceed with DAG submission now? [y/N]: ").strip().lower()
     if answer not in {"y", "yes"}:
@@ -756,16 +800,10 @@ def main():
         print(f"\nInitialization complete!")
         return
     print(f"Submitting DAG: condor_submit_dag {dag_path.name}")
-    proc = subprocess.run(
-        ["condor_submit_dag", dag_path.name],
-        cwd=str(master_dir),
-        check=False,
-        text=True,
-        capture_output=True)
-    if proc.stdout:
-        print(proc.stdout.strip())
-    if proc.stderr:
-        print(proc.stderr.strip())
+    proc = subprocess.run(["condor_submit_dag", dag_path.name],
+                        cwd=str(master_dir), check=False, text=True, capture_output=True)
+    if proc.stdout: print(proc.stdout.strip())
+    if proc.stderr: print(proc.stderr.strip())
     if proc.returncode != 0:
         raise SystemExit(f"condor_submit_dag failed with return code {proc.returncode}")
     m = re.search(r"submitted to cluster\s+(\d+)", (proc.stdout or "") + "\n" + (proc.stderr or ""), re.IGNORECASE)
@@ -777,10 +815,8 @@ def main():
         condor_ids = {}
         condor_ids_path = Path(state["condor_ids_file"])
         if condor_ids_path.exists():
-            try:
-                condor_ids = json.loads(condor_ids_path.read_text(encoding="utf-8"))
-            except Exception:
-                condor_ids = {}
+            try: condor_ids = json.loads(condor_ids_path.read_text(encoding="utf-8"))
+            except Exception: condor_ids = {}
     condor_ids["dagman"] = {"cluster_id": dag_cluster_id}
     Path(state["condor_ids_file"]).write_text(json.dumps(condor_ids, indent=2), encoding="utf-8")
 
