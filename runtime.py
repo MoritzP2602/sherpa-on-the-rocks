@@ -70,7 +70,7 @@ def main(paths):
         # Extract elapsed time (with initialization)
         time_match = re.search(r'Total elapsed time:\s*([0-9\-:]+)', content)
         elapsed = None
-        if time_match:
+        if time_match and events > 0:
             elapsed = parse_time(time_match.group(1))
             yaml_stats[yaml_path]['time'] += elapsed
             yaml_stats[yaml_path]['events_with_init'] += events

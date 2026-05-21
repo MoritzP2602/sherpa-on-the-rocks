@@ -55,7 +55,7 @@ You can make the scripts executable to run them without explicitly calling `bash
 chmod +x ~/sherpa-on-the-rocks/prepare_runs.sh
 chmod +x ~/sherpa-on-the-rocks/yodamerge_runs.sh
 chmod +x ~/sherpa-on-the-rocks/rivet-merge_runs.sh
-chmod +x ~/sherpa-on-the-rocks/analyze_runtime.py
+chmod +x ~/sherpa-on-the-rocks/runtime.py
 ```
 
 
