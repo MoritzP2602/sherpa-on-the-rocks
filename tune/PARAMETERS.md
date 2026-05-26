@@ -100,9 +100,9 @@
 
 ### MERGE_MODE
 - **Type**: String
-- **Default**: `yoda`
-- **Valid Values**: `yoda`, `rivet`
-- **Description**: Merging method to use for combining Sherpa subrun results in phases P3 and P8 (`SHERPA_ON_THE_ROCKS_DIR/yodamerge_runs.sh` and `SHERPA_ON_THE_ROCKS_DIR/rivet-merge_runs.sh`).
+- **Default**: `rivet`
+- **Valid Values**: `rivet`, `yoda`
+- **Description**: Merging method to use for combining Sherpa subrun results in phases P3 and P8 (`SHERPA_ON_THE_ROCKS_DIR/rivet-merge_runs.sh` and `SHERPA_ON_THE_ROCKS_DIR/yodamerge_runs.sh`).
 
 ### COMBINE_MODE
 - **Type**: String

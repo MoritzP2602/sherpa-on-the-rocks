@@ -32,9 +32,9 @@ if [[ "$REWEIGHT" == "1" ]]; then
   TARGET="newscan.rew"
 fi
 
-MERGER_SCRIPT="$SHERPA_ON_THE_ROCKS_DIR/yodamerge_runs.sh"
-if [[ "$MERGE_MODE" == "rivet" ]]; then
-  MERGER_SCRIPT="$SHERPA_ON_THE_ROCKS_DIR/rivet-merge_runs.sh"
+MERGER_SCRIPT="$SHERPA_ON_THE_ROCKS_DIR/rivet-merge_runs.sh"
+if [[ "$MERGE_MODE" == "yoda" ]]; then
+  MERGER_SCRIPT="$SHERPA_ON_THE_ROCKS_DIR/yodamerge_runs.sh"
 fi
 
 MERGE_NPROC=8

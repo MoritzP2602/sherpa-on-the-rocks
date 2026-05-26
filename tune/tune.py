@@ -227,9 +227,9 @@ def build_state(cfg, config_path: Path):
     if any(bool(b["reweight"]) for b in input_dir_blocks) and not pattern:
         raise KeyError("Missing required key: PATTERN (required when INPUT_DIRx.REWEIGHTING is on)")
 
-    merge_mode = str(cfg.get("MERGE_MODE", "yoda")).strip().lower()
-    if merge_mode not in {"yoda", "rivet"}:
-        raise ValueError("MERGE_MODE must be 'yoda' or 'rivet'")
+    merge_mode = str(cfg.get("MERGE_MODE", "rivet")).strip().lower()
+    if merge_mode not in {"rivet", "yoda"}:
+        raise ValueError("MERGE_MODE must be 'rivet' or 'yoda'")
 
     start_point_survey = int(cfg.get("START_POINT_SURVEY", 500))
     restarts = int(cfg.get("RESTARTS", 20))

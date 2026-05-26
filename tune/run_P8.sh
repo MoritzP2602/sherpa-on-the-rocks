@@ -28,9 +28,9 @@ load_dir_state "$STATE_JSON" "$DIR_INDEX"
 cd "$INPUT_DIR"
 
 MERGE_NPROC=8
-MERGER_SCRIPT="$SHERPA_ON_THE_ROCKS_DIR/yodamerge_runs.sh"
-if [[ "$MERGE_MODE" == "rivet" ]]; then
-    MERGER_SCRIPT="$SHERPA_ON_THE_ROCKS_DIR/rivet-merge_runs.sh"
+MERGER_SCRIPT="$SHERPA_ON_THE_ROCKS_DIR/rivet-merge_runs.sh"
+if [[ "$MERGE_MODE" == "yoda" ]]; then
+    MERGER_SCRIPT="$SHERPA_ON_THE_ROCKS_DIR/yodamerge_runs.sh"
 fi
 
 run_cmd "8" "$TAG" bash "$MERGER_SCRIPT" --rm validation "$MERGE_NPROC"
