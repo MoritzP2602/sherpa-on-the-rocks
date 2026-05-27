@@ -32,6 +32,7 @@ if [[ "$GRID_MODE" == "import" ]]; then
   CREATE_GRID_CMD+=(import "${INPUT_DIR_1}/newscan.grid.dat" template.yaml)
 else
   CREATE_GRID_CMD+=(sample parameter.json template.yaml -n "$N_GRID")
+  CREATE_GRID_CMD+=(--sampling "$GRID_SAMPLING")
 fi
 CREATE_GRID_CMD+=(--table --plots --outdir newscan --overwrite)
 if [[ "$REWEIGHT" == "1" ]]; then

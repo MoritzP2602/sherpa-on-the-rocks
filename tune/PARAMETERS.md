@@ -98,6 +98,12 @@
 - **Default**: `INPUT_DIR1/merged` (only for two-input runs)
 - **Description**: Directory for combined reference data and tune results when using two input directories. Only used if `INPUT_DIR2` is specified.
 
+### GRID_SAMPLING
+- **Type**: String
+- **Default**: `random`
+- **Valid Values**: `random`, `uniform`
+- **Description**: Sampling strategy used by `app-tools-create_grid` in phase P1 when generating the tuning grid for `INPUT_DIR1`. `random` draws points uniformly at random within the parameter ranges; `uniform` lays points on a regular grid. Note: `uniform` is incompatible with dynamic parameter bounds (`app-tools-create_grid` will error in that case).
+
 ### MERGE_MODE
 - **Type**: String
 - **Default**: `rivet`

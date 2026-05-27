@@ -223,6 +223,10 @@ def build_state(cfg, config_path: Path):
     if n_dirs not in (1, 2):
         raise ValueError("Provide one or two input directories via INPUT_DIR1[/INPUT_DIR2]")
 
+    grid_sampling = str(cfg.get("GRID_SAMPLING", "random")).strip().lower()
+    if grid_sampling not in {"random", "uniform"}:
+        raise ValueError("GRID_SAMPLING must be 'random' or 'uniform'")
+
     pattern = str(cfg.get("PATTERN", "")).strip()
     if any(bool(b["reweight"]) for b in input_dir_blocks) and not pattern:
         raise KeyError("Missing required key: PATTERN (required when INPUT_DIRx.REWEIGHTING is on)")
@@ -337,6 +341,7 @@ def build_state(cfg, config_path: Path):
         "condor_output"           : condor_output,
         "input_dirs"              : input_states,
         "n_grid"                  : n_grid,
+        "grid_sampling"           : grid_sampling,
         "surrogate_order"         : surrogate_order,
         "surrogate_order_safe"    : surrogate_order.replace(",", "_"),
         "pattern"                 : pattern,
@@ -705,7 +710,10 @@ def main():
     print("  Input directories:")
     n_dirs = len(state["input_dirs"])
     for idx, item in enumerate(state["input_dirs"], start=1):
-        dir_rows = [("grid mode",              item["grid_mode"]),
+        grid_mode_display = item["grid_mode"]
+        if item["grid_mode"] == "sample":
+            grid_mode_display = f"sample ({state['grid_sampling']})"
+        dir_rows = [("grid mode",              grid_mode_display),
                     ("reweighting",            "on" if item["reweight"] else "off"),
                     ("subruns",                item["n_subruns"]),
                     ("validation reweighting", "on" if item["validation_reweight"] else "off"),
