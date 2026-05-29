@@ -65,11 +65,32 @@ Config : ${CONFIG_PATH}
 else
   LOG_DIR="${CONDOR_OUTPUT}/${PHASE_KEY}"
 
-  if [[ "$PHASE_KEY" == P2_* || "$PHASE_KEY" == P7_* ]]; then
+  if [[ "$PHASE_KEY" == P2* || "$PHASE_KEY" == P7* ]]; then
     if compgen -G "${LOG_DIR}/overview.*.log" > /dev/null 2>&1; then
-      OUTPUT=$(cat "${LOG_DIR}"/overview.*.log 2>/dev/null || true)
+      OVERVIEW=$(cat "${LOG_DIR}"/overview.*.log 2>/dev/null || true)
+      N_COMPLETE=$(printf '%s\n' "$OVERVIEW" | grep -c '^\[COMPLETE\]' || true)
+      N_TIMEOUT=$(printf '%s\n'  "$OVERVIEW" | grep -c '^\[TIMEOUT\]'  || true)
+      N_FAILED=$(printf '%s\n'   "$OVERVIEW" | grep -c '^\[FAILED\]'   || true)
+      FAILED_LINES=$(printf '%s\n' "$OVERVIEW" | grep -E '^\[(TIMEOUT|FAILED)\]' || true)
+      OUTPUT="Subrun summary:
+  [COMPLETE] : ${N_COMPLETE}
+  [TIMEOUT]  : ${N_TIMEOUT}
+  [FAILED]   : ${N_FAILED}
+"
+      if [[ -n "$FAILED_LINES" ]]; then
+        OUTPUT+="
+Failed / timed-out subruns:
+${FAILED_LINES}
+"
+      fi
     else
       OUTPUT="(no overview log found in ${LOG_DIR})"
+    fi
+  elif [[ "$PHASE_KEY" == P4* || "$PHASE_KEY" == P5* ]]; then
+    if compgen -G "${LOG_DIR}/job.*.out" > /dev/null 2>&1; then
+      OUTPUT=$(cat "${LOG_DIR}"/job.*.out 2>/dev/null | grep -v '^\[0\]' || true)
+    else
+      OUTPUT="(no job output found in ${LOG_DIR})"
     fi
   else
     if compgen -G "${LOG_DIR}/job.*.out" > /dev/null 2>&1; then
