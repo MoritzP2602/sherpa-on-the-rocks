@@ -121,19 +121,14 @@ merge_dir() {
             merge_chunked "$out_dir" "$OUTFILE" "${FILES[@]}"
         else
             echo "Merging YODA files into $OUTFILE..."
-            if command -v yodamerge >/dev/null 2>&1; then
-                yodamerge "${FILES[@]}" -o "$OUTFILE"
-                if [ "$REMOVE_SUBDIRS" = true ] && [ -f "$OUTFILE" ] && [ -z "$OUTPUT_DIR" ]; then
-                    for subdir in "$dir"/*; do
-                        if [ -d "$subdir" ]; then
-                            echo "Removing $subdir..."
-                            rm -rf "$subdir"
-                        fi
-                    done
-                fi
-            else
-                echo "Error: yodamerge command not found. Please install YODA or adjust the script to point to the correct path!"
-                exit 1
+            yodamerge "${FILES[@]}" -o "$OUTFILE"
+            if [ "$REMOVE_SUBDIRS" = true ] && [ -f "$OUTFILE" ] && [ -z "$OUTPUT_DIR" ]; then
+                for subdir in "$dir"/*; do
+                    if [ -d "$subdir" ]; then
+                        echo "Removing $subdir..."
+                        rm -rf "$subdir"
+                    fi
+                done
             fi
         fi
     fi
@@ -175,19 +170,14 @@ merge_flat() {
             merge_chunked "$out_dir" "$OUTFILE" "${FILES[@]}"
         else
             echo "Merging YODA files from all subdirectories into $OUTFILE..."
-            if command -v yodamerge >/dev/null 2>&1; then
-                yodamerge "${FILES[@]}" -o "$OUTFILE"
-                if [ "$REMOVE_SUBDIRS" = true ] && [ -f "$OUTFILE" ] && [ -z "$OUTPUT_DIR" ]; then
-                    for subdir in "$PREFIX"/*; do
-                        if [ -d "$subdir" ]; then
-                            echo "Removing $subdir..."
-                            rm -rf "$subdir"
-                        fi
-                    done
-                fi
-            else
-                echo "Error: yodamerge command not found. Please install YODA or adjust the script to point to the correct path!"
-                exit 1
+            yodamerge "${FILES[@]}" -o "$OUTFILE"
+            if [ "$REMOVE_SUBDIRS" = true ] && [ -f "$OUTFILE" ] && [ -z "$OUTPUT_DIR" ]; then
+                for subdir in "$PREFIX"/*; do
+                    if [ -d "$subdir" ]; then
+                        echo "Removing $subdir..."
+                        rm -rf "$subdir"
+                    fi
+                done
             fi
         fi
     fi
@@ -198,98 +188,93 @@ merge_chunked() {
     local outfile="$2"
     shift 2
     local files=("$@")
-    
-    if command -v yodamerge >/dev/null 2>&1; then
-        local total_files=${#files[@]}
-        local num_chunks=$(( (total_files + CHUNK_SIZE - 1) / CHUNK_SIZE ))
-        local chunk_parallel="$NPROC"
-        if [ "$num_chunks" -lt "$chunk_parallel" ]; then
-            chunk_parallel="$num_chunks"
-        fi
-        
-        echo "Total files: $total_files, Chunk size: $CHUNK_SIZE, Number of chunks: $num_chunks, Parallel jobs: $NPROC"
 
-        local temp_dir="$dir/.yodamerge_tmp"
-        mkdir -p "$temp_dir"
+    local total_files=${#files[@]}
+    local num_chunks=$(( (total_files + CHUNK_SIZE - 1) / CHUNK_SIZE ))
+    local chunk_parallel="$NPROC"
+    if [ "$num_chunks" -lt "$chunk_parallel" ]; then
+        chunk_parallel="$num_chunks"
+    fi
 
-        local quoted_temp_dir
-        printf -v quoted_temp_dir '%q' "$temp_dir"
-        trap "rm -rf $quoted_temp_dir" EXIT INT TERM
-        local chunk_num=0
-        local chunk_pids=()
-        local chunk_failed=0
+    echo "Total files: $total_files, Chunk size: $CHUNK_SIZE, Number of chunks: $num_chunks, Parallel jobs: $NPROC"
 
-        wait_batch() {
-            local pid
-            for pid in "${chunk_pids[@]}"; do
-                if ! wait "$pid"; then
-                    chunk_failed=1
-                fi
-            done
-            chunk_pids=()
-        }
+    local temp_dir="$dir/.yodamerge_tmp"
+    mkdir -p "$temp_dir"
 
-        echo "Processing chunks in parallel batches of $chunk_parallel..."
-        for ((i=0; i<total_files; i+=CHUNK_SIZE)); do
-            local chunk_files=("${files[@]:i:CHUNK_SIZE}")
-            local temp_file="$temp_dir/chunk_${chunk_num}.yoda"
-            (
-                echo "Merging chunk $chunk_num (${#chunk_files[@]} files) -> $(basename "$temp_file")"
-                yodamerge "${chunk_files[@]}" -o "$temp_file"
-            ) &
-            chunk_pids+=($!)
+    local quoted_temp_dir
+    printf -v quoted_temp_dir '%q' "$temp_dir"
+    trap "rm -rf $quoted_temp_dir" EXIT INT TERM
+    local chunk_num=0
+    local chunk_pids=()
+    local chunk_failed=0
 
-            chunk_num=$((chunk_num + 1))
-
-            if (( chunk_num % chunk_parallel == 0 )); then
-                echo "Waiting for batch to complete..."
-                wait_batch
+    wait_batch() {
+        local pid
+        for pid in "${chunk_pids[@]}"; do
+            if ! wait "$pid"; then
+                chunk_failed=1
             fi
         done
+        chunk_pids=()
+    }
 
-        echo "Waiting for final batch to complete..."
-        wait_batch
+    echo "Processing chunks in parallel batches of $chunk_parallel..."
+    for ((i=0; i<total_files; i+=CHUNK_SIZE)); do
+        local chunk_files=("${files[@]:i:CHUNK_SIZE}")
+        local temp_file="$temp_dir/chunk_${chunk_num}.yoda"
+        (
+            echo "Merging chunk $chunk_num (${#chunk_files[@]} files) -> $(basename "$temp_file")"
+            yodamerge "${chunk_files[@]}" -o "$temp_file"
+        ) &
+        chunk_pids+=($!)
 
-        if [ "$chunk_failed" -ne 0 ]; then
-            echo "Error: one or more chunk merges failed, aborting."
-            rm -rf "$temp_dir"
-            trap - EXIT INT TERM
-            return 1
+        chunk_num=$((chunk_num + 1))
+
+        if (( chunk_num % chunk_parallel == 0 )); then
+            echo "Waiting for batch to complete..."
+            wait_batch
         fi
+    done
 
-        echo "Merging $chunk_num temporary files into final output..."
-        mapfile -t temp_files < <(find "$temp_dir" -name "chunk_*.yoda" | sort)
+    echo "Waiting for final batch to complete..."
+    wait_batch
 
-        if [ "${#temp_files[@]}" -eq 0 ]; then
-            echo "Error: no chunk files produced, aborting."
-            rm -rf "$temp_dir"
-            trap - EXIT INT TERM
-            return 1
+    if [ "$chunk_failed" -ne 0 ]; then
+        echo "Error: one or more chunk merges failed, aborting."
+        rm -rf "$temp_dir"
+        trap - EXIT INT TERM
+        return 1
+    fi
+
+    echo "Merging $chunk_num temporary files into final output..."
+    mapfile -t temp_files < <(find "$temp_dir" -name "chunk_*.yoda" | sort)
+
+    if [ "${#temp_files[@]}" -eq 0 ]; then
+        echo "Error: no chunk files produced, aborting."
+        rm -rf "$temp_dir"
+        trap - EXIT INT TERM
+        return 1
+    fi
+
+    if yodamerge "${temp_files[@]}" -o "$outfile"; then
+        echo "Cleaning up temporary files..."
+        rm -rf "$temp_dir"
+        trap - EXIT INT TERM
+
+        if [ "$REMOVE_SUBDIRS" = true ] && [ -f "$outfile" ] && [ -z "$OUTPUT_DIR" ]; then
+            for subdir in "$dir"/*; do
+                if [ -d "$subdir" ] && [ "$subdir" != "$temp_dir" ]; then
+                    echo "Removing $subdir..."
+                    rm -rf "$subdir"
+                fi
+            done
         fi
-
-        if yodamerge "${temp_files[@]}" -o "$outfile"; then
-            echo "Cleaning up temporary files..."
-            rm -rf "$temp_dir"
-            trap - EXIT INT TERM
-            
-            if [ "$REMOVE_SUBDIRS" = true ] && [ -f "$outfile" ] && [ -z "$OUTPUT_DIR" ]; then
-                for subdir in "$dir"/*; do
-                    if [ -d "$subdir" ] && [ "$subdir" != "$temp_dir" ]; then
-                        echo "Removing $subdir..."
-                        rm -rf "$subdir"
-                    fi
-                done
-            fi
-            echo "Successfully created $outfile"
-        else
-            echo "Error: Final merge failed, cleaning up temporary directory..."
-            rm -rf "$temp_dir"
-            trap - EXIT INT TERM
-            return 1
-        fi
+        echo "Successfully created $outfile"
     else
-        echo "Error: yodamerge command not found. Please install YODA or adjust the script to point to the correct path!"
-        exit 1
+        echo "Error: Final merge failed, cleaning up temporary directory..."
+        rm -rf "$temp_dir"
+        trap - EXIT INT TERM
+        return 1
     fi
 }
 
@@ -342,6 +327,11 @@ TOTAL_DIRS=$(( ${#ALL_NESTED_DIRS[@]} + ${#ALL_FLAT_DIRS[@]} ))
 if [ "$TOTAL_DIRS" -eq 0 ]; then
     echo "No valid directories found to merge."
     exit 0
+fi
+
+if ! command -v yodamerge >/dev/null 2>&1; then
+    echo "Error: yodamerge command not found. Please install YODA or adjust the script to point to the correct path!" >&2
+    exit 1
 fi
 
 if [ "$CHUNK_SIZE" -gt 0 ]; then
