@@ -27,7 +27,7 @@ load_global_state "$STATE_JSON"
 load_dir_state "$STATE_JSON" "$DIR_INDEX"
 cd "$INPUT_DIR"
 
-MERGE_NPROC=8
+MERGE_NPROC="$MAX_CPUS"
 MERGER_SCRIPT="$SHERPA_ON_THE_ROCKS_DIR/rivet-merge_runs.sh"
 if [[ "$MERGE_MODE" == "yoda" ]]; then
     MERGER_SCRIPT="$SHERPA_ON_THE_ROCKS_DIR/yodamerge_runs.sh"

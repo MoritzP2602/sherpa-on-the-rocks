@@ -37,7 +37,7 @@ if [[ "$MERGE_MODE" == "yoda" ]]; then
   MERGER_SCRIPT="$SHERPA_ON_THE_ROCKS_DIR/yodamerge_runs.sh"
 fi
 
-MERGE_NPROC=8
+MERGE_NPROC="$MAX_CPUS"
 if [[ "$REWEIGHT" == "1" ]]; then
   run_cmd "3" "$TAG" bash "$MERGER_SCRIPT" --rm --chunked 10 "$TARGET" "$MERGE_NPROC"
 else

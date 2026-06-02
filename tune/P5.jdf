@@ -1,7 +1,7 @@
 Executable     = /bin/bash
 arguments      = $(JOB_DIR)/run_P5.sh $(STATE_JSON) $(Cluster) $(Process) $(PHASE_LOG_DIR)
 +MaxRuntime    = $(MAXRUNTIME)
-request_cpus   = 8
+request_cpus   = $(MAX_CPUS)
 max_idle       = 1000
 
 Log            = $(PHASE_LOG_DIR)/job.$(Cluster).$(Process).log

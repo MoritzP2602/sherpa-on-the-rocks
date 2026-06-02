@@ -223,6 +223,10 @@ def build_state(cfg, config_path: Path):
     if n_dirs not in (1, 2):
         raise ValueError("Provide one or two input directories via INPUT_DIR1[/INPUT_DIR2]")
 
+    for idx, idir in enumerate(input_dirs, start=1):
+        if not idir.exists() or not idir.is_dir():
+            raise FileNotFoundError(f"INPUT_DIR{idx} does not exist or is not a directory: {idir}")
+
     grid_sampling = str(cfg.get("GRID_SAMPLING", "random")).strip().lower()
     if grid_sampling not in {"random", "uniform"}:
         raise ValueError("GRID_SAMPLING must be 'random' or 'uniform'")
@@ -245,6 +249,15 @@ def build_state(cfg, config_path: Path):
     combine_mode = str(cfg.get("COMBINE_MODE", "weighted")).strip().lower()
     if n_dirs == 2 and combine_mode not in {"weighted", "equal"}:
         raise ValueError("COMBINE_MODE must be 'weighted' or 'equal' for two-input tunes")
+
+    validation_only_err    = parse_on_off(cfg.get("VALIDATION_ONLY_ERR", "off"), "VALIDATION_ONLY_ERR")
+    validation_only_merged = parse_on_off(cfg.get("VALIDATION_ONLY_MERGED", "off"), "VALIDATION_ONLY_MERGED")
+    if validation_only_merged and n_dirs != 2:
+        raise ValueError("VALIDATION_ONLY_MERGED requires two input directories (no merged tune exists for a single input)")
+
+    max_cpus = int(cfg.get("MAX_CPUS", 8))
+    if max_cpus <= 0:
+        raise ValueError("MAX_CPUS must be > 0")
 
     rivet_env_script        = resolve_cfg_path(cfg["RIVET_ENV_SCRIPT"], config_path)
     sherpa_on_the_rocks_dir = resolve_cfg_path(cfg["SHERPA_ON_THE_ROCKS_DIR"], config_path)
@@ -350,6 +363,9 @@ def build_state(cfg, config_path: Path):
         "combine_mode"            : combine_mode,
         "merged_dir"              : merged_dir,
         "merge_mode"              : merge_mode,
+        "validation_only_err"     : validation_only_err,
+        "validation_only_merged"  : validation_only_merged,
+        "max_cpus"                : max_cpus,
         "P1_maxruntime"           : int(cfg.get("PHASE1_MAXRUNTIME", 1800)),
         "P2_maxruntime"           : int(cfg.get("PHASE2_MAXRUNTIME", 86400)),
         "P3_maxruntime"           : int(cfg.get("PHASE3_MAXRUNTIME", 86400)),
@@ -586,7 +602,8 @@ def create_dag(state, include_jobs: set[str]):
                  "STATE_JSON"    : state_path,
                  "DIR_INDEX"     : str(i),
                  "PHASE_LOG_DIR" : str(croot / f"P3_dir{i}"),
-                 "MAXRUNTIME"    : str(state["P3_maxruntime"])})
+                 "MAXRUNTIME"    : str(state["P3_maxruntime"]),
+                 "MAX_CPUS"      : str(state.get("max_cpus", 8))})
         if include_job(f"P4_dir{i}"):
             v(f"P4_dir{i}",
               f"P4.jdf",
@@ -594,14 +611,16 @@ def create_dag(state, include_jobs: set[str]):
                  "STATE_JSON"    : state_path,
                  "DIR_INDEX"     : str(i),
                  "PHASE_LOG_DIR" : str(croot / f"P4_dir{i}"),
-                 "MAXRUNTIME"    : str(state["P4_maxruntime"])})
+                 "MAXRUNTIME"    : str(state["P4_maxruntime"]),
+                 "MAX_CPUS"      : str(state.get("max_cpus", 8))})
     if include_job("P5"):
             v(f"P5",
               f"P5.jdf",
                 {"JOB_DIR"       : str(job_dir),
                  "STATE_JSON"    : state_path,
                  "PHASE_LOG_DIR" : str(croot / f"P5"),
-                 "MAXRUNTIME"    : str(state["P5_maxruntime"])})
+                 "MAXRUNTIME"    : str(state["P5_maxruntime"]),
+                 "MAX_CPUS"      : str(state.get("max_cpus", 8))})
     for i in range(1, n_dirs + 1):
         if include_job(f"P6_dir{i}"):
             v(f"P6_dir{i}",
@@ -629,14 +648,16 @@ def create_dag(state, include_jobs: set[str]):
                  "STATE_JSON"    : state_path,
                  "DIR_INDEX"     : str(i),
                  "PHASE_LOG_DIR" : str(croot / f"P8_dir{i}"),
-                 "MAXRUNTIME"    : str(state["P8_maxruntime"])})
+                 "MAXRUNTIME"    : str(state["P8_maxruntime"]),
+                 "MAX_CPUS"      : str(state.get("max_cpus", 8))})
     if include_job("P9"):
             v(f"P9",
               f"P9.jdf",
                 {"JOB_DIR"       : str(job_dir),
                  "STATE_JSON"    : state_path,
                  "PHASE_LOG_DIR" : str(croot / f"P9"),
-                 "MAXRUNTIME"    : str(state["P9_maxruntime"])})
+                 "MAXRUNTIME"    : str(state["P9_maxruntime"]),
+                 "MAX_CPUS"      : str(state.get("max_cpus", 8))})
     notify_script = str((job_dir / "notify.sh").resolve())
     email = state.get("email", "") or ""
     for i in range(1, n_dirs + 1):
@@ -710,18 +731,31 @@ def main():
     print("  Input directories:")
     n_dirs = len(state["input_dirs"])
     for idx, item in enumerate(state["input_dirs"], start=1):
-        grid_mode_display = item["grid_mode"]
-        if item["grid_mode"] == "sample":
-            grid_mode_display = f"sample ({state['grid_sampling']})"
-        dir_rows = [("grid mode",              grid_mode_display),
-                    ("reweighting",            "on" if item["reweight"] else "off"),
+        dir_rows = [("grid mode",              item["grid_mode"]),
+                    ("reweighting",            "on" if item["reweight"] else None),
                     ("subruns",                item["n_subruns"]),
-                    ("validation reweighting", "on" if item["validation_reweight"] else "off"),
+                    ("validation reweighting", "on" if item["validation_reweight"] else None),
                     ("validation subruns",     item["n_val_subruns"])]
         dw = max(len(k) for k, _ in dir_rows)
         print(f"    Input {idx}: {item['path']}")
         for k, v in dir_rows:
-            print(f"      - {k:<{dw}} : {v}")
+            if v is not None: print(f"      - {k:<{dw}} : {v}")
+    print()
+
+    print("  Grid settings:")
+    validation_grid = "all tune(s)"
+    if state["validation_only_err"] and state["validation_only_merged"]:
+        validation_grid = "only merged error tune"
+    elif state["validation_only_err"]:
+        validation_grid = "only error tune(s)"
+    elif state["validation_only_merged"]:
+        validation_grid = "only merged tune(s)"
+    grid_rows = [("N_GRID",          state["n_grid"]),
+                 ("GRID_SAMPLING",   state["grid_sampling"]),
+                 ("validation grid", validation_grid)]
+    gw = max(len(k) for k, _ in grid_rows)
+    for k, v in grid_rows:
+        print(f"    - {k:<{gw}} : {v}")
     print()
 
     print("  Apprentice settings:")
@@ -757,6 +791,7 @@ def main():
     print()
 
     state_path = master_dir / "state.json"
+    condor_ids = None
     if not resume_mode:
         n_dirs = len(state["input_dirs"])
         jobs = dag_jobs(n_dirs)

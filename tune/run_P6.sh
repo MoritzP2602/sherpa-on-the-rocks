@@ -27,14 +27,21 @@ load_global_state "$STATE_JSON"
 load_dir_state "$STATE_JSON" "$DIR_INDEX"
 cd "$INPUT_DIR"
 
-CREATE_VALIDATION_GRID_CMD=(app-tools-create_grid tune "." template.yaml --outdir validation)
-if [[ "${VALIDATION_REWEIGHT:-0}" == "1" ]]; then
-  CREATE_VALIDATION_GRID_CMD+=(--nominal nominal.json)
+PREFIX_ARGS=()
+if [[ "${VALIDATION_ONLY_ERR:-0}" == "1" ]]; then
+  PREFIX_ARGS=(--tune-prefix tune.err)
 fi
-run_cmd "6" "$TAG" "${CREATE_VALIDATION_GRID_CMD[@]}"
+
+if [[ "${VALIDATION_ONLY_MERGED:-0}" != "1" ]]; then
+  CREATE_VALIDATION_GRID_CMD=(app-tools-create_grid tune "." template.yaml --outdir validation "${PREFIX_ARGS[@]}")
+  if [[ "${VALIDATION_REWEIGHT:-0}" == "1" ]]; then
+    CREATE_VALIDATION_GRID_CMD+=(--nominal nominal.json)
+  fi
+  run_cmd "6" "$TAG" "${CREATE_VALIDATION_GRID_CMD[@]}"
+fi
 
 if [[ "$N_INPUT_DIRS" == "2" ]]; then
-  MERGED_VALIDATION_GRID_CMD=(app-tools-create_grid tune "$MERGED_DIR" template.yaml --outdir validation)
+  MERGED_VALIDATION_GRID_CMD=(app-tools-create_grid tune "$MERGED_DIR" template.yaml --outdir validation "${PREFIX_ARGS[@]}")
   if [[ "${VALIDATION_REWEIGHT:-0}" == "1" ]]; then
     MERGED_VALIDATION_GRID_CMD+=(--nominal nominal.json)
   fi

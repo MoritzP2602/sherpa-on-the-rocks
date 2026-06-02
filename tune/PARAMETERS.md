@@ -126,6 +126,24 @@
 - **Default**: 20
 - **Description**: Number of restarts used by `app-tune2`, the best result out of all is returned.
 
+### VALIDATION_ONLY_ERR
+- **Type**: Boolean-like string
+- **Default**: `off`
+- **Valid Values**: `on`, `off`, `true`, `false`
+- **Description**: If `on`, the validation grid (phase P6) is built only from the error tune results (`tune.err.*`), skipping the nominal tune results. Can be combined with `VALIDATION_ONLY_MERGED`.
+
+### VALIDATION_ONLY_MERGED
+- **Type**: Boolean-like string
+- **Default**: `off`
+- **Valid Values**: `on`, `off`, `true`, `false`
+- **Condition**: Requires two input directories (errors at startup otherwise, since no merged tune exists for a single input).
+- **Description**: If `on`, the validation grid (phase P6) is built only from the merged tune results (`*.merged`), skipping the per-input-directory tune results. If both `VALIDATION_ONLY_ERR` and `VALIDATION_ONLY_MERGED` are `on`, only the merged error tune seeds the validation grid (a single validation subdir).
+
+### MAX_CPUS
+- **Type**: Integer
+- **Default**: 8
+- **Description**: Number of CPUs requested for the multi-threaded phases (P3, P4, P5, P8, P9). Sets `request_cpus` in the HTCondor submit files and the merge parallelism (`MERGE_NPROC`) used by the merge scripts in P3/P8. The single-threaded phases (P1, P2, P6, P7) are unaffected.
+
 ### PHASE1_MAXRUNTIME
 - **Type**: Integer (seconds)
 - **Default**: 1800
