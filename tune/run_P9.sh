@@ -24,6 +24,22 @@ fi
 
 load_global_state "$STATE_JSON"
 
+REQUIRED_INPUTS=()
+for idx in $(seq 1 "$N_INPUT_DIRS"); do
+  var="INPUT_DIR_${idx}"; DIR_PATH="${!var}"
+  var="WEIGHTS_${idx}"; WEIGHTS="${!var}"
+  REQUIRED_INPUTS+=("$DIR_PATH/validation" "$WEIGHTS")
+done
+require_inputs "9" "$TAG" "${REQUIRED_INPUTS[@]}"
+for idx in $(seq 1 "$N_INPUT_DIRS"); do
+  var="INPUT_DIR_${idx}"; DIR_PATH="${!var}"
+  if ! find "$DIR_PATH/validation" -name "*.yoda*" -print -quit 2>/dev/null | grep -q .; then
+    log_msg "9" "$TAG" "ERROR: Missing required input: no YODA files found in $DIR_PATH/validation"
+    log_msg "9" "$TAG" "Skipping phase due to missing inputs."
+    exit 1
+  fi
+done
+
 for idx in $(seq 1 "$N_INPUT_DIRS"); do
   var="INPUT_DIR_${idx}"; DIR_PATH="${!var}"
   var="WEIGHTS_${idx}"; WEIGHTS="${!var}"
@@ -90,5 +106,4 @@ print()
 print('\n'.join(lines))
 PY
 
-record_phase_time "$STATE_JSON" "$PHASE_KEY" "end"
 log_msg "9" "$TAG" "Completed successfully."

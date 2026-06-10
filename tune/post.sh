@@ -2,12 +2,35 @@
 
 STATE_JSON="$1"
 PHASE_KEY="$2"
-RETURN_CODE="$3"
+RETURN_CODE="${3:-1}"
 
-trap 'exit 0' EXIT ERR
+if ! [[ "$RETURN_CODE" =~ ^-?[0-9]+$ ]]; then
+  RETURN_CODE=1
+fi
+if [[ "$RETURN_CODE" -eq 0 ]]; then
+  EXIT_CODE=0
+  STATUS="SUCCESS"
+else
+  EXIT_CODE=1
+  STATUS="FAILED"
+fi
+
+finish() {
+  if [[ "$PHASE_KEY" == "init" ]]; then
+    exit 0
+  fi
+  exit "$EXIT_CODE"
+}
 
 if [[ ! -f "$STATE_JSON" ]]; then
-  exit 0
+  finish
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/utils.sh"
+
+if [[ "$PHASE_KEY" != "init" && "$EXIT_CODE" -eq 0 ]]; then
+  record_phase_time "$STATE_JSON" "$PHASE_KEY" "end" || true
 fi
 
 read_state() {
@@ -28,7 +51,7 @@ CONDOR_OUTPUT=$(read_state condor_output)
 CONFIG_PATH=$(read_state config_path)
 
 if [[ -z "$EMAIL" ]]; then
-  exit 0
+  finish
 fi
 
 SUBJECT_BASE="TUNE - ${DAG_CLUSTER_ID:-unknown}"
@@ -61,7 +84,7 @@ Config : ${CONFIG_PATH}
     printf 'Message-ID: %s\n' "$MSG_ID"
     printf '\n'
     printf '%s\n' "$BODY"
-  } | mail -t >/dev/null 2>&1
+  } | mail -t >/dev/null 2>&1 || true
 else
   LOG_DIR="${CONDOR_OUTPUT}/${PHASE_KEY}"
 
@@ -94,7 +117,12 @@ ${FAILED_LINES}
 
   OUTPUT=$(truncate "$OUTPUT")
 
-  BODY="Phase ${PHASE_KEY} finished with return code ${RETURN_CODE}.
+  BODY="Phase ${PHASE_KEY} finished with return code ${RETURN_CODE} (${STATUS})."
+  if [[ "$EXIT_CODE" -ne 0 ]]; then
+    BODY+="
+Dependent phases will be skipped; resume the tune with tune.py after fixing the problem."
+  fi
+  BODY+="
 
 --- Output ---
 ${OUTPUT}"
@@ -106,5 +134,7 @@ ${OUTPUT}"
     printf 'References: %s\n' "$MSG_ID"
     printf '\n'
     printf '%s\n' "$BODY"
-  } | mail -t >/dev/null 2>&1
+  } | mail -t >/dev/null 2>&1 || true
 fi
+
+finish

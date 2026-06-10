@@ -21,7 +21,7 @@ source "$SCRIPT_DIR/utils.sh"
 load_global_state "$STATE_JSON"
 load_dir_state "$STATE_JSON" "$DIR_INDEX"
 
-SHERPA_BINARY="$(realpath "${SHERPA_BINARY/#\~/$HOME}")"
+SHERPA_BINARY="${SHERPA_BINARY/#\~/$HOME}"
 
 STATUS_LOG=""
 if [[ -n "$PHASE_LOG_DIR" ]]; then
@@ -46,6 +46,13 @@ if [[ -z "$DIRECTORY" ]]; then
   exit 1
 fi
 
+if [[ ! -e "$SHERPA_BINARY" ]]; then
+  echo "ERROR: Missing required input: $SHERPA_BINARY"
+  echo "Skipping phase due to missing inputs."
+  exit 1
+fi
+SHERPA_BINARY="$(realpath "$SHERPA_BINARY")"
+
 get_last_event_count() {
   if [[ -z "${OUTFILE:-}" || ! -f "$OUTFILE" ]]; then
     echo "unknown"
@@ -60,14 +67,16 @@ get_last_event_count() {
   fi
 }
 
+OUTDIR=""
+YODA=""
 cleanup() {
   if [[ "${OUTER_CLEANUP_DONE:-0}" -eq 1 ]]; then
     return
   fi
   OUTER_CLEANUP_DONE=1
   echo ""
-  if [[ -f "$TMPDIR/Analysis.yoda.gz" && -d "$OUTDIR" ]]; then
-    if cp -f "$TMPDIR/Analysis.yoda.gz" "$OUTDIR/$YODA" 2>/dev/null; then
+  if [[ -n "$OUTDIR" && -f "${TMPDIR:-/tmp}/Analysis.yoda.gz" && -d "$OUTDIR" ]]; then
+    if cp -f "${TMPDIR:-/tmp}/Analysis.yoda.gz" "$OUTDIR/$YODA" 2>/dev/null; then
       echo "Successfully copied Analysis.yoda.gz to $OUTDIR/$YODA"
     else
       echo "Warning: Failed to copy Analysis.yoda.gz"
@@ -186,9 +195,6 @@ timeout -s TERM "$TIMEOUT" "$SHERPA_BINARY" -f "$YAML" -R "$SEED" || {
       } 200>"$STATUS_LOG.lock"
       rm -f "$STATUS_LOG.lock"
     fi
-    if [[ -n "$STATE_JSON" && -n "$DIR_INDEX" ]]; then
-      record_phase_time "$STATE_JSON" "${PHASE_KEY}_dir${DIR_INDEX}" "end"
-    fi
     exit 0
   else
     if [[ -n "$STATUS_LOG" ]]; then
@@ -197,9 +203,6 @@ timeout -s TERM "$TIMEOUT" "$SHERPA_BINARY" -f "$YAML" -R "$SEED" || {
         printf "[FAILED] %s.%s | DIR: %s | EVENTS: %s | Exit code: %s\n" "$CLUSTER" "$PROCESS" "$OUTDIR" "$last_event" "$exit_code" >> "$STATUS_LOG"
       } 200>"$STATUS_LOG.lock"
       rm -f "$STATUS_LOG.lock"
-    fi
-    if [[ -n "$STATE_JSON" && -n "$DIR_INDEX" ]]; then
-      record_phase_time "$STATE_JSON" "${PHASE_KEY}_dir${DIR_INDEX}" "end"
     fi
     exit 0
   fi
@@ -213,7 +216,4 @@ if [[ -n "$STATUS_LOG" ]]; then
     printf "[COMPLETE] %s.%s | DIR: %s | ELAPSED: %ss\n" "$CLUSTER" "$PROCESS" "$OUTDIR" "$elapsed" >> "$STATUS_LOG"
   } 200>"$STATUS_LOG.lock"
   rm -f "$STATUS_LOG.lock"
-fi
-if [[ -n "$STATE_JSON" && -n "$DIR_INDEX" ]]; then
-  record_phase_time "$STATE_JSON" "${PHASE_KEY}_dir${DIR_INDEX}" "end"
 fi

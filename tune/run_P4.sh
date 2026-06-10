@@ -25,6 +25,17 @@ fi
 
 load_global_state "$STATE_JSON"
 load_dir_state "$STATE_JSON" "$DIR_INDEX"
+
+REQUIRED_INPUTS=("$INPUT_DIR"
+                 "$INPUT_DIR/weights.txt"
+                 "$INPUT_DIR/data.json")
+if [[ "$REWEIGHT" == "1" ]]; then
+  REQUIRED_INPUTS+=("$INPUT_DIR/newscan.rew" "$INPUT_DIR/newscan.rew.var.dat")
+else
+  REQUIRED_INPUTS+=("$INPUT_DIR/newscan")
+fi
+require_inputs "4" "$TAG" "${REQUIRED_INPUTS[@]}"
+
 cd "$INPUT_DIR"
 
 SCAN_DIR="newscan"
@@ -48,5 +59,4 @@ run_cmd "4" "$TAG" app-build "$SCAN_DIR" --order "$SURROGATE_ORDER" -w weights.t
 run_cmd "4" "$TAG" app-tune2 weights.txt data.json "$APP_JSON"                -s "$START_POINT_SURVEY" -r "$RESTARTS" -p -o "$TUNE_DIR"     --quiet
 run_cmd "4" "$TAG" app-tune2 weights.txt data.json "$APP_JSON" -e "$ERR_JSON" -s "$START_POINT_SURVEY" -r "$RESTARTS" -p -o "$TUNE_DIR_ERR" --quiet
 
-record_phase_time "$STATE_JSON" "$PHASE_KEY" "end"
 log_msg "4" "$TAG" "Completed successfully."

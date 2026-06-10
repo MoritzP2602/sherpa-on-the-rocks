@@ -32,20 +32,10 @@ fi
 DIR1="$INPUT_DIR_1"
 DIR2="$INPUT_DIR_2"
 
-mkdir -p "$MERGED_DIR"
-
 TUNE1="$DIR1/tune.${SURROGATE_ORDER_SAFE}.dir1"
 TUNE2="$DIR2/tune.${SURROGATE_ORDER_SAFE}.dir2"
 TUNE1_ERR="$DIR1/tune.err.${SURROGATE_ORDER_SAFE}.dir1"
 TUNE2_ERR="$DIR2/tune.err.${SURROGATE_ORDER_SAFE}.dir2"
-
-if [[ "$COMBINE_MODE" == "weighted" ]]; then
-  run_cmd "5" "$TAG" app-tools-combine_weights "$DIR1/weights.txt" "$TUNE1"     "$DIR2/weights.txt" "$TUNE2"     -o "$MERGED_DIR/weights.txt"
-  run_cmd "5" "$TAG" app-tools-combine_weights "$DIR1/weights.txt" "$TUNE1_ERR" "$DIR2/weights.txt" "$TUNE2_ERR" -o "$MERGED_DIR/weights.err.txt"
-else
-  run_cmd "5" "$TAG" app-tools-combine_weights "$DIR1/weights.txt" 1.0 "$DIR2/weights.txt" 1.0 -o "$MERGED_DIR/weights.txt"
-  run_cmd "5" "$TAG" app-tools-combine_weights "$DIR1/weights.txt" 1.0 "$DIR2/weights.txt" 1.0 -o "$MERGED_DIR/weights.err.txt"
-fi
 
 SCAN1="$DIR1/newscan"
 SCAN2="$DIR2/newscan"
@@ -54,6 +44,26 @@ if [[ "$REWEIGHT_1" == "1" ]]; then
 fi
 if [[ "$REWEIGHT_2" == "1" ]]; then
   SCAN2="$DIR2/newscan.rew.split"
+fi
+
+REQUIRED_INPUTS=("$DIR1/weights.txt"
+                 "$DIR2/weights.txt"
+                 "$MERGED_DIR/data.json"
+                 "$SCAN1"
+                 "$SCAN2")
+if [[ "$COMBINE_MODE" == "weighted" ]]; then
+  REQUIRED_INPUTS+=("$TUNE1" "$TUNE2" "$TUNE1_ERR" "$TUNE2_ERR")
+fi
+require_inputs "5" "$TAG" "${REQUIRED_INPUTS[@]}"
+
+mkdir -p "$MERGED_DIR"
+
+if [[ "$COMBINE_MODE" == "weighted" ]]; then
+  run_cmd "5" "$TAG" app-tools-combine_weights "$DIR1/weights.txt" "$TUNE1"     "$DIR2/weights.txt" "$TUNE2"     -o "$MERGED_DIR/weights.txt"
+  run_cmd "5" "$TAG" app-tools-combine_weights "$DIR1/weights.txt" "$TUNE1_ERR" "$DIR2/weights.txt" "$TUNE2_ERR" -o "$MERGED_DIR/weights.err.txt"
+else
+  run_cmd "5" "$TAG" app-tools-combine_weights "$DIR1/weights.txt" 1.0 "$DIR2/weights.txt" 1.0 -o "$MERGED_DIR/weights.txt"
+  run_cmd "5" "$TAG" app-tools-combine_weights "$DIR1/weights.txt" 1.0 "$DIR2/weights.txt" 1.0 -o "$MERGED_DIR/weights.err.txt"
 fi
 
 TUNE_MERGED="$MERGED_DIR/tune.${SURROGATE_ORDER_SAFE}.merged"
@@ -67,5 +77,4 @@ run_cmd "5" "$TAG" app-build "$SCAN1" "$SCAN2" --order "$SURROGATE_ORDER" -w "$M
 run_cmd "5" "$TAG" app-tune2 "$MERGED_DIR/weights.txt"     "$MERGED_DATA" "$APP_JSON"                -s "$START_POINT_SURVEY" -r "$RESTARTS" -p -o "$TUNE_MERGED"     --quiet
 run_cmd "5" "$TAG" app-tune2 "$MERGED_DIR/weights.err.txt" "$MERGED_DATA" "$APP_JSON" -e "$ERR_JSON" -s "$START_POINT_SURVEY" -r "$RESTARTS" -p -o "$TUNE_MERGED_ERR" --quiet
 
-record_phase_time "$STATE_JSON" "$PHASE_KEY" "end"
 log_msg "5" "$TAG" "Completed successfully."

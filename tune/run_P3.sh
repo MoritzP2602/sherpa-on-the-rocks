@@ -25,7 +25,6 @@ fi
 
 load_global_state "$STATE_JSON"
 load_dir_state "$STATE_JSON" "$DIR_INDEX"
-cd "$INPUT_DIR"
 
 TARGET="newscan"
 if [[ "$REWEIGHT" == "1" ]]; then
@@ -37,6 +36,15 @@ if [[ "$MERGE_MODE" == "yoda" ]]; then
   MERGER_SCRIPT="$SHERPA_ON_THE_ROCKS_DIR/yodamerge_runs.sh"
 fi
 
+require_inputs "3" "$TAG" "$INPUT_DIR" "$INPUT_DIR/$TARGET" "$MERGER_SCRIPT"
+if ! find "$INPUT_DIR/$TARGET" -name "*.yoda*" -print -quit 2>/dev/null | grep -q .; then
+  log_msg "3" "$TAG" "ERROR: Missing required input: no YODA files found in $INPUT_DIR/$TARGET"
+  log_msg "3" "$TAG" "Skipping phase due to missing inputs."
+  exit 1
+fi
+
+cd "$INPUT_DIR"
+
 MERGE_NPROC="$MAX_CPUS"
 if [[ "$REWEIGHT" == "1" ]]; then
   run_cmd "3" "$TAG" bash "$MERGER_SCRIPT" --rm --chunked 10 "$TARGET" "$MERGE_NPROC"
@@ -44,5 +52,4 @@ else
   run_cmd "3" "$TAG" bash "$MERGER_SCRIPT" --rm "$TARGET" "$MERGE_NPROC"
 fi
 
-record_phase_time "$STATE_JSON" "$PHASE_KEY" "end"
 log_msg "3" "$TAG" "Completed successfully."

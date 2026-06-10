@@ -26,9 +26,11 @@ get_last_event_count() {
   fi
 }
 
+OUTDIR=""
+YODA=""
 cleanup() {
   echo ""
-  if [ -f "$TMPDIR/Analysis.yoda.gz" ] && [ -d "$OUTDIR" ]; then
+  if [ -n "$OUTDIR" ] && [ -f "$TMPDIR/Analysis.yoda.gz" ] && [ -d "$OUTDIR" ]; then
     if cp -f "$TMPDIR/Analysis.yoda.gz" "$OUTDIR/$YODA" 2>/dev/null; then
       echo "Successfully copied Analysis.yoda.gz to $OUTDIR/$YODA"
     else
@@ -38,7 +40,9 @@ cleanup() {
     echo "Warning: Analysis.yoda.gz not found"
   fi
 
-  cp *.dat "$OUTDIR" 2>/dev/null || echo "No .dat files found"
+  if [ -n "$OUTDIR" ] && [ -d "$OUTDIR" ]; then
+    cp *.dat "$OUTDIR" 2>/dev/null || echo "No .dat files found"
+  fi
 
   cp -f "$OUTFILE" "$LOGDIR/job.${CLUSTER}.${PROCESS}.out" 2>/dev/null || true
   cp -f "$ERRFILE" "$LOGDIR/job.${CLUSTER}.${PROCESS}.err" 2>/dev/null || true

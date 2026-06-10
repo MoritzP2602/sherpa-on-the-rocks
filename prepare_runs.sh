@@ -233,7 +233,10 @@ process_folder() {
                 if [ -d "$sub_dir" ]; then
                     echo "Skipping existing: $sub_dir"
                 else
-                    mkdir "$sub_dir"
+                    if ! mkdir "$sub_dir"; then
+                        echo "ERROR: Failed to create $sub_dir" >&2
+                        exit 1
+                    fi
                     echo "Created: $sub_dir"
                 fi
                 echo "$(to_output_path "$sub_dir")" >> "$OUTFILE"

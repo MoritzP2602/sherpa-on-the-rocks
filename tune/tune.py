@@ -475,7 +475,20 @@ def handle_resume(current_state: dict) -> tuple[dict, Path, bool, set[str]]:
                 shutil.rmtree(target)
             target.mkdir(parents=True, exist_ok=True)
         return
-    
+
+    def reset_phase_times(state: dict, jobs: set[str]) -> None:
+        phase_times_path = Path(state["phase_times_file"])
+        if not phase_times_path.exists():
+            return
+        try:
+            phase_times = json.loads(phase_times_path.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        for job in jobs:
+            phase_times.pop(job, None)
+        phase_times_path.write_text(json.dumps(phase_times, indent=2, sort_keys=True), encoding="utf-8")
+        return
+
     def cleanup_dagman_files(master_dir: Path, dag_path: Path) -> None:
         base_name = dag_path.name
         for p in sorted(master_dir.glob(f"{base_name}.*")):
@@ -530,6 +543,7 @@ def handle_resume(current_state: dict) -> tuple[dict, Path, bool, set[str]]:
             if answer not in {"y", "yes"}:
                 raise SystemExit("Aborted.")
             reset_phase_output(state, resume_jobs)
+            reset_phase_times(state, resume_jobs)
             cleanup_dagman_files(master_dir, Path(state["dag_path"]))
     return state, master_dir, resume_mode, resume_jobs
 
@@ -658,34 +672,18 @@ def create_dag(state, include_jobs: set[str]):
                  "PHASE_LOG_DIR" : str(croot / f"P9"),
                  "MAXRUNTIME"    : str(state["P9_maxruntime"]),
                  "MAX_CPUS"      : str(state.get("max_cpus", 8))})
-    notify_script = str((job_dir / "notify.sh").resolve())
+    post_script = str((job_dir / "post.sh").resolve())
     email = state.get("email", "") or ""
-    for i in range(1, n_dirs + 1):
-        if include_job(f"P2_dir{i}"):
-            lines.append(f"RETRY P2_dir{i} 0")
-            if email:
-                lines.append(f"SCRIPT POST P2_dir{i} /bin/bash {notify_script} {state_path} P2_dir{i} $RETURN")
-            else:
-                lines.append(f"SCRIPT POST P2_dir{i} /bin/true")
-        if include_job(f"P7_dir{i}"):
-            lines.append(f"RETRY P7_dir{i} 0")
-            if email:
-                lines.append(f"SCRIPT POST P7_dir{i} /bin/bash {notify_script} {state_path} P7_dir{i} $RETURN")
-            else:
-                lines.append(f"SCRIPT POST P7_dir{i} /bin/true")
     if email:
         first_job = next((j for j in dag_jobs(n_dirs) if include_job(j)), None)
         if first_job:
-            lines.append(f"SCRIPT PRE {first_job} /bin/bash {notify_script} {state_path} init 0")
-        for i in range(1, n_dirs + 1):
-            for phase in ["P1", "P3", "P4", "P6", "P8"]:
-                job = f"{phase}_dir{i}"
-                if include_job(job):
-                    lines.append(f"SCRIPT POST {job} /bin/bash {notify_script} {state_path} {job} $RETURN")
-        if n_dirs == 2 and include_job("P5"):
-            lines.append(f"SCRIPT POST P5 /bin/bash {notify_script} {state_path} P5 $RETURN")
-        if include_job("P9"):
-            lines.append(f"SCRIPT POST P9 /bin/bash {notify_script} {state_path} P9 $RETURN")
+            lines.append(f"SCRIPT PRE {first_job} /bin/bash {post_script} {state_path} init 0")
+    for job in dag_jobs(n_dirs):
+        if not include_job(job):
+            continue
+        if job.startswith(("P2_", "P7_")):
+            lines.append(f"RETRY {job} 0")
+        lines.append(f"SCRIPT POST {job} /bin/bash {post_script} {state_path} {job} $RETURN")
     for parent, child in dag_dependencies(n_dirs):
         if include_job(parent) and include_job(child):
             lines.append(f"PARENT {parent} CHILD {child}")

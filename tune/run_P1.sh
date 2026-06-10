@@ -25,6 +25,20 @@ fi
 
 load_global_state "$STATE_JSON"
 load_dir_state "$STATE_JSON" "$DIR_INDEX"
+
+REQUIRED_INPUTS=("$INPUT_DIR"
+                 "$INPUT_DIR/template.yaml"
+                 "$SHERPA_ON_THE_ROCKS_DIR/prepare_runs.sh")
+if [[ "$GRID_MODE" == "import" ]]; then
+  REQUIRED_INPUTS+=("${INPUT_DIR_1}/newscan.grid.dat")
+else
+  REQUIRED_INPUTS+=("$INPUT_DIR/parameter.json")
+fi
+if [[ "$REWEIGHT" == "1" ]]; then
+  REQUIRED_INPUTS+=("$INPUT_DIR/nominal.json")
+fi
+require_inputs "1" "$TAG" "${REQUIRED_INPUTS[@]}"
+
 cd "$INPUT_DIR"
 
 CREATE_GRID_CMD=(app-tools-create_grid)
@@ -53,5 +67,4 @@ if [[ ! -f runs.txt ]]; then
   exit 1
 fi
 
-record_phase_time "$STATE_JSON" "$PHASE_KEY" "end"
 log_msg "1" "$TAG" "Completed successfully."

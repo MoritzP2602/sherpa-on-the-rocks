@@ -52,6 +52,24 @@ setup_tmp_logging() {
   trap cleanup_tmp_logging EXIT ERR SIGTERM SIGINT SIGQUIT
 }
 
+require_inputs() {
+  local phase="$1"
+  local tag="$2"
+  shift 2
+  local missing=0
+  local path
+  for path in "$@"; do
+    if [[ ! -e "$path" ]]; then
+      log_msg "$phase" "$tag" "ERROR: Missing required input: $path"
+      missing=1
+    fi
+  done
+  if [[ "$missing" -eq 1 ]]; then
+    log_msg "$phase" "$tag" "Skipping phase due to missing inputs."
+    exit 1
+  fi
+}
+
 record_condor_id() {
   local state_json="$1"
   local key="$2"
@@ -125,7 +143,10 @@ else:
     data = {}
 entry = data.get(key, {})
 now = datetime.datetime.now().isoformat(timespec='seconds')
-entry[f'{which}_time'] = now
+# P2/P7 subruns all record 'start'; keep the first one of the attempt
+# (tune.py clears the entry for re-run jobs on resume).
+if which != 'start' or not entry.get('start_time'):
+    entry[f'{which}_time'] = now
 data[key] = entry
 dir_name = os.path.dirname(path) or '.'
 base_name = os.path.basename(path)
