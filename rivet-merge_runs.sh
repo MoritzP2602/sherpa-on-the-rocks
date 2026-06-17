@@ -62,13 +62,11 @@ is_number() {
 
 FOLDERS=()
 NPROC=4
-NPROC_USER_SET=false
 
 if [ $# -gt 0 ]; then
     last_arg="${!#}"
     if is_number "$last_arg"; then
         NPROC="$last_arg"
-        NPROC_USER_SET=true
         FOLDERS=("${@:1:$#-1}")
     else
         FOLDERS=("$@")
@@ -330,10 +328,8 @@ for folder in "${FOLDERS[@]}"; do
     done
 
     if [ "$has_nested_subdirs" = true ]; then
-        nested_count=0
         while IFS= read -r dir; do
             ALL_NESTED_DIRS+=("$dir")
-            nested_count=$((nested_count + 1))
         done < <(find "$PREFIX" -mindepth 1 -maxdepth 1 -type d)
     else
         ALL_FLAT_DIRS+=("$PREFIX")

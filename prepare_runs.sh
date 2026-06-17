@@ -48,7 +48,7 @@ if [ $# -lt 1 ]; then
     echo "  --add         : (Optional) Append to existing outfile instead of overwriting"
     echo "  --exact-name  : Skip only directories with <dirname>.yoda or <dirname>.yoda.gz (default: skip directories with any .yoda/.yoda.gz file)"
     echo "  --depth|-d N  : Creation depth relative to each folder (default: 1)"
-    echo "  --quiet@-q    : Suppress messages about skipped and created subdirectories"
+    echo "  --quiet|-q    : Suppress messages about skipped and created subdirectories"
     echo "If nsubfolders is given and folder has subdirectories, creates subfolders in each and lists them in $OUTFILE."
     echo "If nsubfolders is given and folder has no subdirectories, creates subfolders directly in folder and lists them in $OUTFILE."
     echo "If nsubfolders is not given, lists all subdirectories of folder in $OUTFILE."
