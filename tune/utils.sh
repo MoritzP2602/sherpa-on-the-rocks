@@ -93,8 +93,7 @@ path, key, cluster, process = sys.argv[1:5]
 if os.path.exists(path):
     with open(path, 'r', encoding='utf-8') as f:
         data = json.load(f)
-else:
-    data = {}
+else: data = {}
 entry = data.get(key, {})
 entry['cluster_id'] = cluster
 if process:
@@ -143,8 +142,6 @@ else:
     data = {}
 entry = data.get(key, {})
 now = datetime.datetime.now().isoformat(timespec='seconds')
-# P2/P7 subruns all record 'start'; keep the first one of the attempt
-# (tune.py clears the entry for re-run jobs on resume).
 if which != 'start' or not entry.get('start_time'):
     entry[f'{which}_time'] = now
 data[key] = entry
@@ -171,6 +168,9 @@ load_environment() {
   fi
   if [[ -n "${APPRENTICE_INSTALLATION:-}" ]]; then
     export PATH="$APPRENTICE_INSTALLATION:$PATH"
+  fi
+  if [[ -n "${PROFESSOR_INSTALLATION:-}" ]]; then
+    export PATH="$PROFESSOR_INSTALLATION:$PATH"
   fi
   if [[ -n "${RIVET_ENV_SCRIPT:-}" ]]; then
     if [[ ! -f "$RIVET_ENV_SCRIPT" ]]; then
@@ -237,6 +237,7 @@ emit('RIVET_ENV_SCRIPT', s['rivet_env_script'])
 emit('SHERPA_ON_THE_ROCKS_DIR', s['sherpa_on_the_rocks_dir'])
 emit('APP_TOOLS_INSTALLATION', s['app_tools_installation'])
 emit('APPRENTICE_INSTALLATION', s['apprentice_installation'])
+emit('PROFESSOR_INSTALLATION', s['professor_installation'])
 emit('SHERPA_BINARY', s['sherpa_binary'])
 emit('MPI_MODULE', s['mpi_module'])
 emit('NUMBA_DISABLE_JIT', int(bool(s['numba_disable_jit'])))
@@ -245,11 +246,19 @@ emit('CONDOR_OUTPUT', s['condor_output'])
 emit('N_INPUT_DIRS', len(s['input_dirs']))
 emit('N_GRID', s['n_grid'])
 emit('GRID_SAMPLING', s['grid_sampling'])
-emit('SURROGATE_ORDER', s['surrogate_order'])
-emit('SURROGATE_ORDER_SAFE', s['surrogate_order_safe'])
-emit('PATTERN', s.get('pattern', ''))
-emit('START_POINT_SURVEY', s['start_point_survey'])
-emit('RESTARTS', s['restarts'])
+app = s['apprentice']
+if app:
+  emit('APP_ORDER', app['order'])
+  emit('APP_ORDER_SAFE', app['order_safe'])
+  emit('APP_BUILD_OPTIONS', app.get('build_options', ''))
+  emit('APP_TUNE2_OPTIONS', app.get('tune2_options', ''))
+prof = s['professor']
+if prof:
+  emit('PROF_ORDER', prof['order'])
+  emit('PROF_ORDER_SAFE', prof['order_safe'])
+  emit('PROF2_IPOL_OPTIONS', prof.get('ipol_options', ''))
+  emit('PROF2_TUNE_OPTIONS', prof.get('tune_options', ''))
+emit('PATTERN', s['pattern'])
 emit('COMBINE_MODE', s['combine_mode'])
 emit('MERGED_DIR', s['merged_dir'])
 emit('MERGE_MODE', s['merge_mode'])
@@ -281,7 +290,6 @@ def emit(k, v):
 
 emit('INPUT_DIR', d['path'])
 emit('REWEIGHT', int(bool(d['reweight'])))
-emit('VALIDATION_REWEIGHT', int(bool(d['validation_reweight'])))
 emit('N_SUBRUNS', d['n_subruns'])
 emit('N_VAL_SUBRUNS', d['n_val_subruns'])
 emit('GRID_MODE', d['grid_mode'])

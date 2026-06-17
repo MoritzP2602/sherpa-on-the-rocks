@@ -16,10 +16,10 @@ Before running the script, make sure the following are installed and accessible 
 - Rivet environment
 - sherpa-on-the-rocks
 - app-tools installation
-- Apprentice installation
+- Apprentice and/or Professor installation
 - Sherpa installation
 
-These are configured in the steering files via `RIVET_ENV_SCRIPT`, `SHERPA_ON_THE_ROCKS_DIR`, `APP_TOOLS_INSTALLATION`, `APPRENTICE_INSTALLATION` and `SHERPA_BINARY`.
+These are configured in the steering files via `RIVET_ENV_SCRIPT`, `SHERPA_ON_THE_ROCKS_DIR`, `APP_TOOLS_INSTALLATION`, `APPRENTICE_INSTALLATION`, `PROFESSOR_INSTALLATION` and `SHERPA_BINARY`.
 
 For the full list of available steering parameters, see `../PARAMETERS.md`.
 
@@ -45,7 +45,7 @@ Phases:
 - **P1**: create tuning grid and prepare Sherpa subruns
 - **P2**: generate tuning events with Sherpa
 - **P3**: merge tuning outputs
-- **P4**: train surrogate and run optimization (Apprentice)
+- **P4**: train surrogate and run optimization (Apprentice and/or Professor)
 - **P5**: combine two-process tuning results (only for 2-input setups)
 - **P6**: create validation grid from tune result
 - **P7**: generate validation events with Sherpa
@@ -60,7 +60,7 @@ Tune settings are customized in the steering files (e.g. `config1.yaml`, `config
 For each run, the script creates and manages:
 
 - a `MASTER_DIR` with state files, DAG files, and condor logs
-- tuning results in `tune.*` folders
+- tuning results in `Apprentice/` and `Professor/` folders (e.g. `tune.apprentice.*`, `tune.professor.*`)
 - chi2 plots (`chi2.plots`) generated from validation runs
 
 A quick summary can be read from phase 9 output:

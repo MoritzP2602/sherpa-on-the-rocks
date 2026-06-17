@@ -44,8 +44,11 @@ def parse_template_events(template_path: Path) -> int:
     raise ValueError(f"Could not find EVENTS: in {template_path}")
 
 
-def ensure_required_inputs(input_dir: Path, *, require_parameter: bool, require_nominal: bool) -> None:
-    required_files = ["data.json", "template.yaml", "weights.txt"]
+def ensure_required_inputs(input_dir: Path, *, require_parameter: bool, require_nominal: bool,
+                           require_data: bool) -> None:
+    required_files = ["template.yaml", "weights.txt"]
+    if require_data:
+        required_files.append("data.json")
     if require_parameter:
         required_files.append("parameter.json")
     for fname in required_files:
@@ -97,7 +100,7 @@ def get_phase_overview(state):
                 ("P1", "Create tuning grid and prepare Sherpa subruns"),
                 ("P2", "Sherpa event generation for tuning grid"),
                 ("P3", "Merge results of Sherpa subruns using yodamerge/rivet-merge"),
-                ("P4", "Build surrogate model and optimize parameters using Apprentice"),
+                ("P4", "Build surrogate model and optimize parameters"),
                   ])
     if n_dirs == 1: 
         phases.append(("P5", "SKIPPED"))
@@ -160,18 +163,36 @@ def parse_on_off(value, key: str) -> bool:
         return False
     raise ValueError(f"{key} entries must be one of: on/off/true/false, got '{value}'")
 
-def parse_surrogate_order(value: str) -> tuple[int, int]:
+def parse_apprentice_order(value: str) -> tuple[int, int]:
     parts = [x.strip() for x in str(value).split(",")]
     if len(parts) != 2:
-        raise ValueError("SURROGATE_ORDER must have exactly two comma-separated integers, e.g. '2,1'")
+        raise ValueError("APPRENTICE.ORDER must have exactly two comma-separated integers, e.g. '2,1'")
     try:
         k_p = int(parts[0])
         k_q = int(parts[1])
     except ValueError as e:
-        raise ValueError("SURROGATE_ORDER must contain integers, e.g. '2,1'") from e
+        raise ValueError("APPRENTICE.ORDER must contain integers, e.g. '2,1'") from e
     if k_p < 0 or k_q < 0:
-        raise ValueError("SURROGATE_ORDER entries must be >= 0")
+        raise ValueError("APPRENTICE.ORDER entries must be >= 0")
     return k_p, k_q
+
+def parse_professor_order(value: str) -> int:
+    raw = str(value).strip()
+    if "," in raw or len(raw.split()) != 1:
+        raise ValueError("PROFESSOR.ORDER must be a single integer, e.g. '2'")
+    try:
+        k = int(raw)
+    except ValueError as e:
+        raise ValueError("PROFESSOR.ORDER must be a single integer, e.g. '2'") from e
+    if k < 0:
+        raise ValueError("PROFESSOR.ORDER must be >= 0")
+    return k
+
+def parse_backend_options(block: dict, key: str) -> str:
+    value = block.get(key)
+    if value is None:
+        return ""
+    return str(value).strip()
 
 def parse_input_dir_blocks(cfg, config_path: Path):
     blocks = []
@@ -196,8 +217,6 @@ def parse_input_dir_blocks(cfg, config_path: Path):
                 "events_raw"           : block["EVENTS"],
                 "events_validation_raw": events_validation_raw,
                 "reweight"             : parse_on_off(block.get("REWEIGHTING", "off"), f"{key}.REWEIGHTING"),
-                "validation_reweight"  : parse_on_off(block.get("VALIDATION_REWEIGHTING", "off"), 
-                                                      f"{key}.VALIDATION_REWEIGHTING")
                       })
     if not blocks:
         raise KeyError("Missing required key: INPUT_DIR1")
@@ -207,15 +226,22 @@ def parse_input_dir_blocks(cfg, config_path: Path):
 def build_state(cfg, config_path: Path):
     required_keys = ["INPUT_DIR1",
                      "N_GRID",
-                     "SURROGATE_ORDER",
                      "SHERPA_ON_THE_ROCKS_DIR",
                      "APP_TOOLS_INSTALLATION",
-                     "APPRENTICE_INSTALLATION",
                      "SHERPA_BINARY",
                      "RIVET_ENV_SCRIPT"]
     for key in required_keys:
         if key not in cfg:
             raise KeyError(f"Missing required key: {key}")
+
+    apprentice_cfg = cfg.get("APPRENTICE")
+    professor_cfg  = cfg.get("PROFESSOR")
+    if (apprentice_cfg is None) and (professor_cfg is None):
+        raise KeyError("Provide at least one backend: APPRENTICE and/or PROFESSOR")
+    if apprentice_cfg is not None and not isinstance(apprentice_cfg, dict):
+        raise ValueError("APPRENTICE must be a mapping with at least an ORDER key")
+    if professor_cfg is not None and not isinstance(professor_cfg, dict):
+        raise ValueError("PROFESSOR must be a mapping with at least an ORDER key")
 
     input_dir_blocks = parse_input_dir_blocks(cfg, config_path)
     input_dirs = [b["path"] for b in input_dir_blocks]
@@ -239,13 +265,6 @@ def build_state(cfg, config_path: Path):
     if merge_mode not in {"rivet", "yoda"}:
         raise ValueError("MERGE_MODE must be 'rivet' or 'yoda'")
 
-    start_point_survey = int(cfg.get("START_POINT_SURVEY", 500))
-    restarts = int(cfg.get("RESTARTS", 20))
-    if start_point_survey <= 0:
-        raise ValueError("START_POINT_SURVEY must be > 0")
-    if restarts < 0:
-        raise ValueError("RESTARTS must be >= 0")
-
     combine_mode = str(cfg.get("COMBINE_MODE", "weighted")).strip().lower()
     if n_dirs == 2 and combine_mode not in {"weighted", "equal"}:
         raise ValueError("COMBINE_MODE must be 'weighted' or 'equal' for two-input tunes")
@@ -262,7 +281,6 @@ def build_state(cfg, config_path: Path):
     rivet_env_script        = resolve_cfg_path(cfg["RIVET_ENV_SCRIPT"], config_path)
     sherpa_on_the_rocks_dir = resolve_cfg_path(cfg["SHERPA_ON_THE_ROCKS_DIR"], config_path)
     app_tools_installation  = resolve_cfg_path(cfg["APP_TOOLS_INSTALLATION"], config_path)
-    apprentice_installation = resolve_cfg_path(cfg["APPRENTICE_INSTALLATION"], config_path)
     sherpa_binary           = resolve_cfg_path(cfg["SHERPA_BINARY"], config_path)
 
     if not rivet_env_script.exists():
@@ -271,10 +289,23 @@ def build_state(cfg, config_path: Path):
         raise FileNotFoundError(f"SHERPA_ON_THE_ROCKS_DIR does not exist or is not a directory: {sherpa_on_the_rocks_dir}")
     if not app_tools_installation.exists():
         raise FileNotFoundError(f"APP_TOOLS_INSTALLATION does not exist: {app_tools_installation}")
-    if not apprentice_installation.exists():
-        raise FileNotFoundError(f"APPRENTICE_INSTALLATION does not exist: {apprentice_installation}")
     if not sherpa_binary.exists():
         raise FileNotFoundError(f"SHERPA_BINARY does not exist: {sherpa_binary}")
+
+    apprentice_installation = ""
+    if apprentice_cfg is not None:
+        if "APPRENTICE_INSTALLATION" not in cfg:
+            raise KeyError("Missing required key: APPRENTICE_INSTALLATION (required when APPRENTICE is configured)")
+        apprentice_installation = resolve_cfg_path(cfg["APPRENTICE_INSTALLATION"], config_path)
+        if not apprentice_installation.exists():
+            raise FileNotFoundError(f"APPRENTICE_INSTALLATION does not exist: {apprentice_installation}")
+    professor_installation = ""
+    if professor_cfg is not None:
+        if "PROFESSOR_INSTALLATION" not in cfg:
+            raise KeyError("Missing required key: PROFESSOR_INSTALLATION (required when PROFESSOR is configured)")
+        professor_installation = resolve_cfg_path(cfg["PROFESSOR_INSTALLATION"], config_path)
+        if not professor_installation.exists():
+            raise FileNotFoundError(f"PROFESSOR_INSTALLATION does not exist: {professor_installation}")
     
     if "JOB_DIR" in cfg:
         job_dir = resolve_cfg_path(cfg["JOB_DIR"], config_path)
@@ -283,28 +314,49 @@ def build_state(cfg, config_path: Path):
     n_grid = int(cfg["N_GRID"])
     if n_grid <= 0:
         raise ValueError("N_GRID must be > 0")
-    
-    surrogate_order = str(cfg["SURROGATE_ORDER"]).strip()
-    if not surrogate_order:
-        raise ValueError("SURROGATE_ORDER must not be empty")
-    
-    k_p, k_q     = parse_surrogate_order(surrogate_order)
+
+    n_params = get_n_parameters(input_dirs[0] / "parameter.json")
+    min_grid_size = 0
+    apprentice, professor = {}, {}
+    if apprentice_cfg is not None:
+        order = str(apprentice_cfg.get("ORDER", "")).strip()
+        if not order:
+            raise KeyError("Missing required key: APPRENTICE.ORDER")
+        k_p, k_q = parse_apprentice_order(order)
+        apprentice = {
+            "order"        : order,
+            "order_safe"   : order.replace(",", "_"),
+            "build_options": parse_backend_options(apprentice_cfg, "APP_BUILD_OPTIONS"),
+            "tune2_options": parse_backend_options(apprentice_cfg, "APP_TUNE2_OPTIONS")}
+        min_grid_size = max(min_grid_size, math.comb(n_params + k_p, k_p) + math.comb(n_params + k_q, k_q))
+    if professor_cfg is not None:
+        order = str(professor_cfg.get("ORDER", "")).strip()
+        if not order:
+            raise KeyError("Missing required key: PROFESSOR.ORDER")
+        k = parse_professor_order(order)
+        professor = {
+            "order"       : str(k),
+            "order_safe"  : str(k),
+            "ipol_options": parse_backend_options(professor_cfg, "PROF2_IPOL_OPTIONS"),
+            "tune_options": parse_backend_options(professor_cfg, "PROF2_TUNE_OPTIONS")}
+        min_grid_size = max(min_grid_size, math.comb(n_params + k, k))
+
     grid_warning = ""
-    n_params     = get_n_parameters(input_dirs[0] / "parameter.json")
-    min_grid     = math.comb(n_params + k_p, k_p) + math.comb(n_params + k_q, k_q)
-    if n_grid < min_grid:
+    if n_grid < min_grid_size:
         raise ValueError(f"N_GRID = {n_grid} is too small. Minimum required is "
-                         f"{min_grid} with N_p = {n_params} and order = {surrogate_order}.")
-    if n_grid < 2 * min_grid:
-        grid_warning = (f"WARNING: N_GRID = {n_grid} is < 2 * minimum = {2 * min_grid}. "
+                         f"{min_grid_size} with N_p = {n_params} for the configured polynomial order(s).")
+    if n_grid < 2 * min_grid_size:
+        grid_warning = (f"WARNING: N_GRID = {n_grid} is < 2 * minimum = {2 * min_grid_size}. "
                         f"Using at least double the minimum is recommended for stable surrogate fitting.")
 
     input_states = []
     for i, block in enumerate(input_dir_blocks, start=1):
         idir = block["path"]
         reweight = block["reweight"]
-        validation_reweight = block["validation_reweight"]
-        ensure_required_inputs(idir, require_parameter=(i == 1), require_nominal=(reweight or validation_reweight))
+        ensure_required_inputs(idir, 
+                               require_parameter=(i == 1), 
+                               require_nominal=reweight, 
+                               require_data=(apprentice_cfg is not None))
 
         grid_mode       = "sample" if i == 1 else "import"
         req_events      = parse_event_value(block["events_raw"])
@@ -316,7 +368,6 @@ def build_state(cfg, config_path: Path):
         input_states.append({
                 "path"               : str(idir),
                 "reweight"           : reweight,
-                "validation_reweight": validation_reweight,
                 "grid_mode"          : grid_mode,
                 "events"             : req_events,
                 "events_validation"  : req_events_val,
@@ -345,6 +396,7 @@ def build_state(cfg, config_path: Path):
         "sherpa_on_the_rocks_dir" : str(sherpa_on_the_rocks_dir),
         "app_tools_installation"  : str(app_tools_installation),
         "apprentice_installation" : str(apprentice_installation),
+        "professor_installation"  : str(professor_installation),
         "sherpa_binary"           : str(sherpa_binary),
         "mpi_module"              : str(cfg.get("MPI_MODULE", "mpi/openmpi-x86_64")).strip(),
         "numba_disable_jit"       : parse_on_off(cfg.get("NUMBA_DISABLE_JIT", "off"), "NUMBA_DISABLE_JIT"),
@@ -355,11 +407,9 @@ def build_state(cfg, config_path: Path):
         "input_dirs"              : input_states,
         "n_grid"                  : n_grid,
         "grid_sampling"           : grid_sampling,
-        "surrogate_order"         : surrogate_order,
-        "surrogate_order_safe"    : surrogate_order.replace(",", "_"),
+        "apprentice"              : apprentice,
+        "professor"               : professor,
         "pattern"                 : pattern,
-        "start_point_survey"      : start_point_survey,
-        "restarts"                : restarts,
         "combine_mode"            : combine_mode,
         "merged_dir"              : merged_dir,
         "merge_mode"              : merge_mode,
@@ -550,7 +600,7 @@ def handle_resume(current_state: dict) -> tuple[dict, Path, bool, set[str]]:
 
 def cleanup_input_artifacts(state: dict) -> None:
     input_dirs = [Path(item["path"]) for item in state["input_dirs"]]
-    patterns = ["newscan*", "app_*.json", "err_*.json", "tune.*", "validation", "chi2.json","chi2.plots"]
+    patterns = ["newscan*", "Apprentice", "Professor", "validation", "chi2.json", "chi2-plots"]
     found_artifacts = []
     for input_dir in input_dirs:
         for pattern in patterns:
@@ -732,11 +782,10 @@ def main():
     print("  Input directories:")
     n_dirs = len(state["input_dirs"])
     for idx, item in enumerate(state["input_dirs"], start=1):
-        dir_rows = [("grid mode",              item["grid_mode"]),
-                    ("reweighting",            "on" if item["reweight"] else None),
-                    ("subruns",                item["n_subruns"]),
-                    ("validation reweighting", "on" if item["validation_reweight"] else None),
-                    ("validation subruns",     item["n_val_subruns"])]
+        dir_rows = [("grid mode",          item["grid_mode"]),
+                    ("reweighting",        "on" if item["reweight"] else None),
+                    ("subruns",            item["n_subruns"]),
+                    ("validation subruns", item["n_val_subruns"])]
         dw = max(len(k) for k, _ in dir_rows)
         print(f"    Input {idx}: {item['path']}")
         for k, v in dir_rows:
@@ -759,22 +808,33 @@ def main():
         print(f"    - {k:<{gw}} : {v}")
     print()
 
-    print("  Apprentice settings:")
-    appbuild_rows = [("SURROGATE_ORDER", state["surrogate_order"])]
-    if any(d["reweight"] for d in state["input_dirs"]):
-        appbuild_rows.append(("PATTERN (split_reweighting.py)", state["pattern"]))
-    apptune_rows = [("START_POINT_SURVEY", state["start_point_survey"]),
-                    ("RESTARTS",           state["restarts"])]
+    reweight_on = any(d["reweight"] for d in state["input_dirs"])
+    if state["apprentice"]:
+        app = state["apprentice"]
+        print("  Apprentice settings:")
+        app_rows = [("ORDER",             app["order"]),
+                    ("APP_BUILD_OPTIONS", app["build_options"] or "(none)"),
+                    ("APP_TUNE2_OPTIONS", app["tune2_options"] or "(none)")]
+        if reweight_on:
+            app_rows.append(("PATTERN (split_reweighting.py)", state["pattern"]))
+        aw = max(len(k) for k, _ in app_rows)
+        for k, v in app_rows:
+            print(f"    - {k:<{aw}} : {v}")
+        print()
+    if state["professor"]:
+        prof = state["professor"]
+        print("  Professor settings:")
+        prof_rows = [("ORDER",              prof["order"]),
+                     ("PROF2_IPOL_OPTIONS", prof["ipol_options"] or "(none)"),
+                     ("PROF2_TUNE_OPTIONS", prof["tune_options"] or "(none)")]
+        pw = max(len(k) for k, _ in prof_rows)
+        for k, v in prof_rows:
+            print(f"    - {k:<{pw}} : {v}")
+        print()
     if n_dirs == 2:
-        apptune_rows.append(("COMBINE_MODE (combine_weights.py)", state["combine_mode"]))
-    aw = max(len(k) for k, _ in appbuild_rows + apptune_rows)
-    print("    app-build:")
-    for k, v in appbuild_rows:
-        print(f"      - {k:<{aw}} : {v}")
-    print("    app-tune2:")
-    for k, v in apptune_rows:
-        print(f"      - {k:<{aw}} : {v}")
-    print()
+        print("  Merged weights settings:")
+        print(f"    - COMBINE_MODE (combine_weights.py) : {state['combine_mode']}")
+        print()
     if grid_warning:
         print(grid_warning)
         print()
@@ -809,9 +869,10 @@ def main():
                 raise SystemExit(f"Merged directory already exists: {merged_dir}")
             merged_dir.mkdir(parents=True, exist_ok=False)
             print(f"Created merged directory: {merged_dir}")
-            input_dir_paths = [Path(item["path"]) for item in state["input_dirs"]]
-            write_stacked_json_values(input_dir_paths, merged_dir)
-            print(f"Created combined reference data JSON: {merged_dir / 'data.json'}")
+            if state["apprentice"]:
+                input_dir_paths = [Path(item["path"]) for item in state["input_dirs"]]
+                write_stacked_json_values(input_dir_paths, merged_dir)
+                print(f"Created combined reference data JSON: {merged_dir / 'data.json'}")
 
         state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
         print(f"Created state file: {state_path}")

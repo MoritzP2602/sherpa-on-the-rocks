@@ -9,7 +9,6 @@
   - `EVENTS_VALIDATION`: Number of events for validation (same format as EVENTS)
 - **Optional Fields**:
   - `REWEIGHTING`: Whether to use reweighting for the entire event generation (default: "off", values: on/off/true/false)
-  - `VALIDATION_REWEIGHTING`: Whether to create an additional reweighting runcard during validation (default: "off", values: on/off/true/false)
 
 ### INPUT_DIR2
 - **Required Fields** (when present):
@@ -18,30 +17,37 @@
   - `EVENTS_VALIDATION`: Number of events for validation
 - **Optional Fields**:
   - `REWEIGHTING`: Whether to use reweighting for the entire event generation (default: "off", values: on/off/true/false)
-  - `VALIDATION_REWEIGHTING`: Whether to create an additional reweighting runcard during validation (default: "off", values: on/off/true/false)
 
 **The input directories must contain the following**:
-- `template.json` - template for a Sherpa runcard
+- `template.yaml` - template for a Sherpa runcard
 - `parameter.json` (only INPUT_DIR1) - contains the parameter ranges
-- `nominal.json` (only if REWEIGHTING or VALIDATION_REWEIGHTING is enabled) - contains the nominal parameter values
+- `nominal.json` (only if REWEIGHTING is enabled) - contains the nominal parameter values
 - `init/` - directory containing Sherpa integration results (`Process` and `Results.zip`) (obtained from e.g. `Sherpa -e 0 ...`)
 - `weights.txt` - contains the weights for all observables (can be created using `app-tools-write_weights`)
-- `data.json` - contains reference data for the relevant analyses (can be created using `app-datadirtojson`)
+- `data.json` (**only if `APPRENTICE` is configured**) - contains reference data for the relevant analyses (can be created using `app-datadirtojson`). Professor loads reference data automatically via `prof2-tune -R`, so it is not required for Professor-only runs.
 
 ### N_GRID
 - **Type**: Integer
 - **Description**: Number of grid points for surrogate model training. Must be at least as large as the minimum required by the surrogate order and number of parameters. Minimum recommended value is 2× the theoretical minimum for stable fitting.
 
-### SURROGATE_ORDER
-- **Type**: String (format: k_p,k_q)
-- **Example**: `2,1` or `"2,1"`
-- **Description**: Polynomial order for the surrogate model used by `app-build`. Specify as two comma-separated integers representing the orders for the primary and secondary surrogates. The minimum required grid size is determined by combinatorial formulas based on this order and the number of parameters.
+### Tuning backends (APPRENTICE / PROFESSOR)
+- **Condition**: **At least one** of `APPRENTICE` or `PROFESSOR` must be configured. Each block, when present, activates that backend.
+- **Combined execution**: If both are configured, phases P4 and P5 run Apprentice first, then Professor. Each backend writes to its own `Apprentice/` and `Professor/` output folder.
+
+#### APPRENTICE
+- `ORDER` (**required**): String `k_p,k_q` (e.g. `2,1`). Two comma-separated integers giving the orders of the numerator/denominator surrogate polynomials used by `app-build`.
+- `APP_BUILD_OPTIONS` (optional): Free-form CLI option string appended to every `app-build` call (only if non-empty). Use this for any optional Apprentice build flags.
+- `APP_TUNE2_OPTIONS` (optional): Free-form CLI option string appended to every `app-tune2` call (only if non-empty). For example `-s 500 -r 20` sets the survey size and number of restarts.
+
+#### PROFESSOR
+- `ORDER` (**required**): A single integer (e.g. `2`). Giving the order of the surrogate polynomial used by `prof2-ipol`.
+- `PROF2_IPOL_OPTIONS` (optional): Free-form CLI option string appended to every `prof2-ipol` call (only if non-empty).
+- `PROF2_TUNE_OPTIONS` (optional): Free-form CLI option string appended to every `prof2-tune` call (only if non-empty).
 
 ### PATTERN
 - **Type**: String
 - **Condition**: **Required** if `INPUT_DIR1.REWEIGHTING` or `INPUT_DIR2.REWEIGHTING` is `on`.
 - **Description**: Pattern passed to `app-tools-split_reweighting` in phase P4 to split reweighted runs.
-- **Note**: Not required when only `VALIDATION_REWEIGHTING` is enabled.
 
 ### RIVET_ENV_SCRIPT
 - **Type**: Path
@@ -57,7 +63,13 @@
 
 ### APPRENTICE_INSTALLATION
 - **Type**: Path
+- **Condition**: **Required** when the `APPRENTICE` backend is configured.
 - **Description**: Path to the Apprentice installation directory. You can check the path using e.g. `which app-build`.
+
+### PROFESSOR_INSTALLATION
+- **Type**: Path
+- **Condition**: **Required** when the `PROFESSOR` backend is configured.
+- **Description**: Path to the Professor (Professor2) installation directory. You can check the path using e.g. `which prof2-ipol`.
 
 ### SHERPA_BINARY
 - **Type**: Path
@@ -114,23 +126,13 @@
 - **Type**: String
 - **Default**: `weighted`
 - **Valid Values**: `weighted`, `equal` (only for two-input runs)
-- **Description**: Method for combining tuning results from two processes. If `weighted` is used, the weights are automatically rescaled to balance the contribution to the global chi2 of each process, `equal` rescales all weights by 1.0.
-
-### START_POINT_SURVEY
-- **Type**: Integer
-- **Default**: 500
-- **Description**: Survey size used by `app-tune2` to determine a start point for the chi2 minimization.
-
-### RESTARTS
-- **Type**: Integer
-- **Default**: 20
-- **Description**: Number of restarts used by `app-tune2`, the best result out of all is returned.
+- **Description**: Method for combining tuning results from two processes. Applied per backend in P5. If `weighted` is used, the weights are automatically rescaled to balance the contribution to the global chi2 of each process, `equal` rescales all weights by 1.0.
 
 ### VALIDATION_ONLY_ERR
 - **Type**: Boolean-like string
 - **Default**: `off`
 - **Valid Values**: `on`, `off`, `true`, `false`
-- **Description**: If `on`, the validation grid (phase P6) is built only from the error tune results (`tune.err.*`), skipping the nominal tune results. Can be combined with `VALIDATION_ONLY_MERGED`.
+- **Description**: If `on`, the validation grid (phase P6) is built only from the error tune results (`tune.<backend>.err.*`), skipping the nominal tune results. Applied to every active backend. Can be combined with `VALIDATION_ONLY_MERGED`.
 
 ### VALIDATION_ONLY_MERGED
 - **Type**: Boolean-like string

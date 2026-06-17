@@ -27,8 +27,10 @@ load_global_state "$STATE_JSON"
 load_dir_state "$STATE_JSON" "$DIR_INDEX"
 
 REQUIRED_INPUTS=("$INPUT_DIR"
-                 "$INPUT_DIR/weights.txt"
-                 "$INPUT_DIR/data.json")
+                 "$INPUT_DIR/weights.txt")
+if [[ -n "${APP_ORDER:-}" ]]; then
+  REQUIRED_INPUTS+=("$INPUT_DIR/data.json")
+fi
 if [[ "$REWEIGHT" == "1" ]]; then
   REQUIRED_INPUTS+=("$INPUT_DIR/newscan.rew" "$INPUT_DIR/newscan.rew.var.dat")
 else
@@ -49,14 +51,52 @@ if [[ "$REWEIGHT" == "1" ]]; then
   SCAN_DIR="newscan.rew.split"
 fi
 
-APP_JSON="app_${SURROGATE_ORDER_SAFE}.json"
-ERR_JSON="err_${SURROGATE_ORDER_SAFE}.json"
-TUNE_DIR="tune.${SURROGATE_ORDER_SAFE}.dir${DIR_INDEX}"
-TUNE_DIR_ERR="tune.err.${SURROGATE_ORDER_SAFE}.dir${DIR_INDEX}"
+# ---------------------------------------------------------------------------- #
+# Apprentice backend                                                           #
+# ---------------------------------------------------------------------------- #
+if [[ -n "${APP_ORDER:-}" ]]; then
+  log_msg "4" "$TAG" "Building and tuning with Apprentice (order ${APP_ORDER})."
+  APP_BUILD_OPTS=()
+  APP_TUNE2_OPTS=()
+  if [[ -n "${APP_BUILD_OPTIONS:-}" ]]; then read -ra APP_BUILD_OPTS <<< "$APP_BUILD_OPTIONS"; fi
+  if [[ -n "${APP_TUNE2_OPTIONS:-}" ]]; then read -ra APP_TUNE2_OPTS <<< "$APP_TUNE2_OPTIONS"; fi
 
-run_cmd "4" "$TAG" app-build "$SCAN_DIR" --order "$SURROGATE_ORDER" -w weights.txt        -o "$APP_JSON" --quiet
-run_cmd "4" "$TAG" app-build "$SCAN_DIR" --order "$SURROGATE_ORDER" -w weights.txt --errs -o "$ERR_JSON" --quiet
-run_cmd "4" "$TAG" app-tune2 weights.txt data.json "$APP_JSON"                -s "$START_POINT_SURVEY" -r "$RESTARTS" -p -o "$TUNE_DIR"     --quiet
-run_cmd "4" "$TAG" app-tune2 weights.txt data.json "$APP_JSON" -e "$ERR_JSON" -s "$START_POINT_SURVEY" -r "$RESTARTS" -p -o "$TUNE_DIR_ERR" --quiet
+  rm -rf Apprentice
+  mkdir -p Apprentice
+
+  APP_JSON="Apprentice/app.${APP_ORDER_SAFE}.json"
+  ERR_JSON="Apprentice/err.${APP_ORDER_SAFE}.json"
+  TUNE_DIR="Apprentice/tune.apprentice.${APP_ORDER_SAFE}.dir${DIR_INDEX}"
+  TUNE_DIR_ERR="Apprentice/tune.apprentice.err.${APP_ORDER_SAFE}.dir${DIR_INDEX}"
+
+  run_cmd "4" "$TAG" app-build "$SCAN_DIR" --order "$APP_ORDER" -w weights.txt        -o "$APP_JSON" "${APP_BUILD_OPTS[@]}" --quiet
+  run_cmd "4" "$TAG" app-build "$SCAN_DIR" --order "$APP_ORDER" -w weights.txt --errs -o "$ERR_JSON" "${APP_BUILD_OPTS[@]}" --quiet
+  run_cmd "4" "$TAG" app-tune2 weights.txt data.json "$APP_JSON"                "${APP_TUNE2_OPTS[@]}" -p -o "$TUNE_DIR"     --quiet
+  run_cmd "4" "$TAG" app-tune2 weights.txt data.json "$APP_JSON" -e "$ERR_JSON" "${APP_TUNE2_OPTS[@]}" -p -o "$TUNE_DIR_ERR" --quiet
+fi
+
+# ---------------------------------------------------------------------------- #
+# Professor backend                                                            #
+# ---------------------------------------------------------------------------- #
+if [[ -n "${PROF_ORDER:-}" ]]; then
+  log_msg "4" "$TAG" "Building and tuning with Professor (order ${PROF_ORDER})."
+  PROF_IPOL_OPTS=()
+  PROF_TUNE_OPTS=()
+  if [[ -n "${PROF2_IPOL_OPTIONS:-}" ]]; then read -ra PROF_IPOL_OPTS <<< "$PROF2_IPOL_OPTIONS"; fi
+  if [[ -n "${PROF2_TUNE_OPTIONS:-}" ]]; then read -ra PROF_TUNE_OPTS <<< "$PROF2_TUNE_OPTIONS"; fi
+
+  rm -rf Professor
+  mkdir -p Professor
+
+  IPOL="Professor/ipol.${PROF_ORDER_SAFE}.dat"
+  IPOL_ERR="Professor/ipol.err.${PROF_ORDER_SAFE}.dat"
+  PROF_TUNE_DIR="Professor/tune.professor.${PROF_ORDER_SAFE}.dir${DIR_INDEX}"
+  PROF_TUNE_DIR_ERR="Professor/tune.professor.err.${PROF_ORDER_SAFE}.dir${DIR_INDEX}"
+
+  run_cmd "4" "$TAG" prof2-ipol "$SCAN_DIR" "$IPOL"     --order "$PROF_ORDER" -w weights.txt --ierrs none "${PROF_IPOL_OPTS[@]}"
+  run_cmd "4" "$TAG" prof2-ipol "$SCAN_DIR" "$IPOL_ERR" --order "$PROF_ORDER" -w weights.txt              "${PROF_IPOL_OPTS[@]}"
+  run_cmd "4" "$TAG" prof2-tune "$IPOL"     -w weights.txt -R -o "$PROF_TUNE_DIR"     "${PROF_TUNE_OPTS[@]}"
+  run_cmd "4" "$TAG" prof2-tune "$IPOL_ERR" -w weights.txt -R -o "$PROF_TUNE_DIR_ERR" "${PROF_TUNE_OPTS[@]}"
+fi
 
 log_msg "4" "$TAG" "Completed successfully."
