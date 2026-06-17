@@ -105,28 +105,40 @@ ${FAILED_LINES}
 "
       fi
     else
-      OUTPUT="(no overview log found in ${LOG_DIR})"
+      OUTPUT="(no overview log file found in ${LOG_DIR})"
     fi
+    ERROR="(if you see this, something went wrong in an unexpected way, investigate DAGMan logs...)"
   else
     if compgen -G "${LOG_DIR}/job.*.out" > /dev/null 2>&1; then
       OUTPUT=$(cat "${LOG_DIR}"/job.*.out 2>/dev/null || true)
     else
-      OUTPUT="(no job output found in ${LOG_DIR})"
+      OUTPUT="(no job output file found in ${LOG_DIR})"
+    fi
+    if compgen -G "${LOG_DIR}/job.*.err" > /dev/null 2>&1; then
+      ERROR=$(cat "${LOG_DIR}"/job.*.err 2>/dev/null || true)
+    else
+      ERROR="(no job error output file found in ${LOG_DIR})"
     fi
   fi
 
   OUTPUT=$(truncate "$OUTPUT")
+  ERROR=$(truncate "$ERROR")
 
-  BODY="Phase ${PHASE_KEY} finished with return code ${RETURN_CODE} (${STATUS})."
+  BODY="Phase ${PHASE_KEY} finished with return code ${RETURN_CODE} [${STATUS}]."
   if [[ "$EXIT_CODE" -ne 0 ]]; then
     BODY+="
 Dependent phases will be skipped; resume the tune with tune.py after fixing the problem."
   fi
   BODY+="
 
---- Output ---
+--- OUTPUT ---
 ${OUTPUT}"
+  if [[ "$EXIT_CODE" -ne 0 ]]; then
+    BODY+="
 
+--- ERROR OUTPUT ---
+${ERROR}"
+  fi
   {
     printf 'To: %s\n' "$EMAIL"
     printf 'Subject: RE: %s\n' "$SUBJECT_BASE"
