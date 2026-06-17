@@ -16,7 +16,7 @@ else
 fi
 
 finish() {
-  if [[ "$PHASE_KEY" == "init" ]]; then
+  if [[ "$PHASE_KEY" == "init" || "$PHASE_KEY" == "resume" ]]; then
     exit 0
   fi
   exit "$EXIT_CODE"
@@ -29,7 +29,7 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/utils.sh"
 
-if [[ "$PHASE_KEY" != "init" && "$EXIT_CODE" -eq 0 ]]; then
+if [[ "$PHASE_KEY" != "init" && "$PHASE_KEY" != "resume" && "$EXIT_CODE" -eq 0 ]]; then
   record_phase_time "$STATE_JSON" "$PHASE_KEY" "end" || true
 fi
 
@@ -73,6 +73,20 @@ truncate() {
 
 if [[ "$PHASE_KEY" == "init" ]]; then
   BODY="Tune workflow started.
+
+DAGMan cluster ID : ${DAG_CLUSTER_ID:-unknown}
+Submitted at : $(date)
+Config : ${CONFIG_PATH}
+"
+  {
+    printf 'To: %s\n' "$EMAIL"
+    printf 'Subject: %s\n' "$SUBJECT_BASE"
+    printf 'Message-ID: %s\n' "$MSG_ID"
+    printf '\n'
+    printf '%s\n' "$BODY"
+  } | mail -t >/dev/null 2>&1 || true
+elif [[ "$PHASE_KEY" == "resume" ]]; then
+  BODY="Tune workflow resumed.
 
 DAGMan cluster ID : ${DAG_CLUSTER_ID:-unknown}
 Submitted at : $(date)

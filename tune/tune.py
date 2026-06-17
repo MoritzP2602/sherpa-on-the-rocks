@@ -573,7 +573,7 @@ def cleanup_input_artifacts(state: dict) -> None:
     return
 
 
-def create_dag(state, include_jobs: set[str]):
+def create_dag(state, include_jobs: set[str], resume_mode: bool) -> None:
     master_dir = Path(state["master_dir"]) 
     croot      = Path(state["condor_output"]) 
     job_dir    = Path(state["job_dir"]) 
@@ -677,7 +677,10 @@ def create_dag(state, include_jobs: set[str]):
     if email:
         first_job = next((j for j in dag_jobs(n_dirs) if include_job(j)), None)
         if first_job:
-            lines.append(f"SCRIPT PRE {first_job} /bin/bash {post_script} {state_path} init 0")
+            if resume_mode:
+                lines.append(f"SCRIPT PRE {first_job} /bin/bash {post_script} {state_path} resume 0")
+            else:
+                lines.append(f"SCRIPT PRE {first_job} /bin/bash {post_script} {state_path} init 0")
     for job in dag_jobs(n_dirs):
         if not include_job(job):
             continue
@@ -823,7 +826,7 @@ def main():
         print(f"Created phase times file: {state['phase_times_file']}")
 
     dag_content = create_dag(state,
-        include_jobs=resume_jobs if resume_mode else set(dag_jobs(len(state["input_dirs"]))))
+        include_jobs=resume_jobs if resume_mode else set(dag_jobs(len(state["input_dirs"]))), resume_mode=resume_mode)
     dag_path = Path(state["dag_path"])
     dag_path.write_text(dag_content, encoding="utf-8")
     if resume_mode:
