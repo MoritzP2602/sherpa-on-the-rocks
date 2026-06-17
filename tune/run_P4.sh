@@ -93,7 +93,7 @@ if [[ -n "${PROF_ORDER:-}" ]]; then
   PROF_TUNE_DIR="Professor/tune.professor.${PROF_ORDER_SAFE}.dir${DIR_INDEX}"
   PROF_TUNE_DIR_ERR="Professor/tune.professor.err.${PROF_ORDER_SAFE}.dir${DIR_INDEX}"
 
-  run_cmd "4" "$TAG" prof2-ipol "$SCAN_DIR" "$IPOL"     --order "$PROF_ORDER" -w weights.txt --ierrs none "${PROF_IPOL_OPTS[@]}"
+  run_cmd "4" "$TAG" prof2-ipol "$SCAN_DIR" "$IPOL"     --order "$PROF_ORDER" -w weights.txt --ierr none "${PROF_IPOL_OPTS[@]}"
   run_cmd "4" "$TAG" prof2-ipol "$SCAN_DIR" "$IPOL_ERR" --order "$PROF_ORDER" -w weights.txt              "${PROF_IPOL_OPTS[@]}"
   run_cmd "4" "$TAG" prof2-tune "$IPOL"     -w weights.txt -R -o "$PROF_TUNE_DIR"     "${PROF_TUNE_OPTS[@]}"
   run_cmd "4" "$TAG" prof2-tune "$IPOL_ERR" -w weights.txt -R -o "$PROF_TUNE_DIR_ERR" "${PROF_TUNE_OPTS[@]}"

@@ -513,7 +513,7 @@ def handle_resume(current_state: dict) -> tuple[dict, Path, bool, set[str]]:
         normalized.pop("email", None)
         return normalized
     
-    def reset_phase_output(state: dict, jobs: set[str]) -> list[Path]:
+    def reset_phase_output(state: dict, jobs: set[str]) -> None:
         croot = Path(state["condor_output"])
         for job in sorted(jobs):
             if "_dir" in job:
@@ -767,10 +767,13 @@ def main():
     mpi_available = check_mpi_module_available(mpi_module) if mpi_module else False
     mpi_status = "available" if mpi_available else "NOT available"
     general_rows = [("Sherpa binary",             state.get("sherpa_binary", "<unset>")),
-                    ("app-tools installation",    state.get("app_tools_installation", "<unset>")),
-                    ("Apprentice installation",   state.get("apprentice_installation", "<unset>")),
-                    ("Rivet environment script",  state.get("rivet_env_script", "<unset>")),
-                    ("MPI module",                f"{mpi_module} ({mpi_status})")]
+                    ("app-tools installation",    state.get("app_tools_installation", "<unset>"))]
+    if state.get("apprentice"):
+        general_rows.append(("Apprentice installation", state.get("apprentice_installation", "<unset>")))
+    if state.get("professor"):
+        general_rows.append(("Professor installation", state.get("professor_installation", "<unset>")))
+    general_rows.append(("Rivet environment script", state.get("rivet_env_script", "<unset>")))
+    general_rows.append(("MPI module",               f"{mpi_module} ({mpi_status})"))
     if state.get("email"):
         general_rows.append(("Email notifications", state["email"]))
     gw = max(len(k) for k, _ in general_rows)
