@@ -4,6 +4,7 @@ OUTFILE="runs.txt"
 APPEND=false
 EXACT_NAME=false
 DEPTH=1
+QUIET=false
 POSITIONAL=()
 
 while [ $# -gt 0 ]; do
@@ -25,6 +26,9 @@ while [ $# -gt 0 ]; do
             fi
             DEPTH="$1"
             shift ;;
+        -q|--quiet)
+            QUIET=true
+            shift ;;
         *) POSITIONAL+=("$1"); shift ;;
     esac
 done
@@ -43,7 +47,8 @@ if [ $# -lt 1 ]; then
     echo "  -o outfile    : (Optional) Output filename (default: runs.txt)"
     echo "  --add         : (Optional) Append to existing outfile instead of overwriting"
     echo "  --exact-name  : Skip only directories with <dirname>.yoda or <dirname>.yoda.gz (default: skip directories with any .yoda/.yoda.gz file)"
-    echo "  --depth N     : Creation depth relative to each folder (default: 1)"
+    echo "  --depth|-d N  : Creation depth relative to each folder (default: 1)"
+    echo "  --quiet@-q    : Suppress messages about skipped and created subdirectories"
     echo "If nsubfolders is given and folder has subdirectories, creates subfolders in each and lists them in $OUTFILE."
     echo "If nsubfolders is given and folder has no subdirectories, creates subfolders directly in folder and lists them in $OUTFILE."
     echo "If nsubfolders is not given, lists all subdirectories of folder in $OUTFILE."
@@ -155,7 +160,7 @@ process_folder() {
                 for subdir in "$dir"/*; do
                     [ -d "$subdir" ] || continue
                     if should_skip_yoda "$subdir"; then
-                        echo "Skipping $subdir (matching YODA found)"
+                        [ "$QUIET" = false ] && echo "Skipping $subdir (matching YODA found)"
                         continue
                     fi
                     echo "$(to_output_path "$subdir")" >> "$OUTFILE"
@@ -228,6 +233,7 @@ process_folder() {
                 continue
             fi
 
+            echo "Creating $n subdirectories in $dir..."
             for ((j=0; j<n; j++)); do
                 sub_dir=$(printf "%s/%0${width}d" "$dir" "$j")
                 if [ -d "$sub_dir" ]; then
@@ -237,7 +243,7 @@ process_folder() {
                         echo "ERROR: Failed to create $sub_dir" >&2
                         exit 1
                     fi
-                    echo "Created: $sub_dir"
+                    [ "$QUIET" = false ] && echo "Created: $sub_dir"
                 fi
                 echo "$(to_output_path "$sub_dir")" >> "$OUTFILE"
             done

@@ -3,6 +3,7 @@
 REMOVE_SUBDIRS=false
 CHUNK_SIZE=0
 NMAX=-1
+QUIET=false
 OUTPUT_DIR=""
 POSITIONAL=()
 
@@ -24,6 +25,9 @@ while [ $# -gt 0 ]; do
                 exit 1
             fi
             NMAX="$1"; shift ;;
+        -q|--quiet)
+            QUIET=true
+            shift ;;
         --output|-o)
             shift
             if [ -z "${1-}" ]; then
@@ -44,6 +48,7 @@ if [ $# -lt 1 ]; then
     echo "  --rm            : (Optional) Remove merged subdirectories after successful merge to free space"
     echo "  --chunked N     : (Optional) Merge in chunks of N files (reduces memory usage). Processes nproc chunks in parallel."
     echo "  --nmax N        : (Optional) Maximum number of yoda files to merge per directory (default: all)"
+    echo "  --quiet|-q      : (Optional) Call yodamerge with --quiet"
     echo "  --output|-o DIR : (Optional) Output directory for merged files (preserves input structure)"
     echo "If subdirectories have their own subfolders, merges all .yoda/.yoda.gz files from nested subdirectories into a single .yoda file in each subdirectory."
     echo "If subdirectories do not have subfolders, merges all .yoda/.yoda.gz files from all subdirectories into a single .yoda file in the parent folder."
@@ -85,6 +90,17 @@ if [ -n "$OUTPUT_DIR" ] && [ ${#FOLDERS[@]} -ne 1 ]; then
     exit 1
 fi
 
+yoda_merge() {
+    local outfile="${!#}"
+    local files=("${@:1:$#-1}")
+
+    if [ "$QUIET" = true ]; then
+        command yodamerge "${files[@]}" -o "$outfile" --quiet
+    else
+        command yodamerge "${files[@]}" -o "$outfile"
+    fi
+}
+
 merge_dir() {
     dir="$1"
     YODA=$(basename "$dir")
@@ -121,7 +137,7 @@ merge_dir() {
             merge_chunked "$out_dir" "$OUTFILE" "${FILES[@]}"
         else
             echo "Merging YODA files into $OUTFILE..."
-            yodamerge "${FILES[@]}" -o "$OUTFILE"
+            yoda_merge "${FILES[@]}" "$OUTFILE"
             if [ "$REMOVE_SUBDIRS" = true ] && [ -f "$OUTFILE" ] && [ -z "$OUTPUT_DIR" ]; then
                 for subdir in "$dir"/*; do
                     if [ -d "$subdir" ]; then
@@ -170,7 +186,7 @@ merge_flat() {
             merge_chunked "$out_dir" "$OUTFILE" "${FILES[@]}"
         else
             echo "Merging YODA files from all subdirectories into $OUTFILE..."
-            yodamerge "${FILES[@]}" -o "$OUTFILE"
+            yoda_merge "${FILES[@]}" "$OUTFILE"
             if [ "$REMOVE_SUBDIRS" = true ] && [ -f "$OUTFILE" ] && [ -z "$OUTPUT_DIR" ]; then
                 for subdir in "$PREFIX"/*; do
                     if [ -d "$subdir" ]; then
@@ -224,7 +240,7 @@ merge_chunked() {
         local temp_file="$temp_dir/chunk_${chunk_num}.yoda"
         (
             echo "Merging chunk $chunk_num (${#chunk_files[@]} files) -> $(basename "$temp_file")"
-            yodamerge "${chunk_files[@]}" -o "$temp_file"
+            yoda_merge "${chunk_files[@]}" "$temp_file"
         ) &
         chunk_pids+=($!)
 
@@ -256,7 +272,7 @@ merge_chunked() {
         return 1
     fi
 
-    if yodamerge "${temp_files[@]}" -o "$outfile"; then
+    if yoda_merge "${temp_files[@]}" "$outfile"; then
         echo "Cleaning up temporary files..."
         rm -rf "$temp_dir"
         trap - EXIT INT TERM
@@ -281,10 +297,12 @@ merge_chunked() {
 export -f merge_dir
 export -f merge_flat
 export -f merge_chunked
+export -f yoda_merge
 export REMOVE_SUBDIRS
 export CHUNK_SIZE
 export NPROC
 export NMAX
+export QUIET
 export OUTPUT_DIR
 export BASE_INPUT_DIR
 
