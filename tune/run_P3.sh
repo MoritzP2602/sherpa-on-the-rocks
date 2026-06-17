@@ -47,9 +47,9 @@ cd "$INPUT_DIR"
 
 MERGE_NPROC="$MAX_CPUS"
 if [[ "$REWEIGHT" == "1" ]]; then
-  run_cmd "3" "$TAG" bash "$MERGER_SCRIPT" --rm --chunked 10 "$TARGET" "$MERGE_NPROC"
+  run_cmd "3" "$TAG" bash "$MERGER_SCRIPT" --rm --chunked 10 "$TARGET" "$MERGE_NPROC" --quiet
 else
-  run_cmd "3" "$TAG" bash "$MERGER_SCRIPT" --rm "$TARGET" "$MERGE_NPROC"
+  run_cmd "3" "$TAG" bash "$MERGER_SCRIPT" --rm "$TARGET" "$MERGE_NPROC" --quiet
 fi
 
 log_msg "3" "$TAG" "Completed successfully."

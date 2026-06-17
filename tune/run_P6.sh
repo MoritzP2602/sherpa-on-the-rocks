@@ -73,7 +73,7 @@ if [[ "$N_INPUT_DIRS" == "2" ]]; then
   run_cmd "6" "$TAG" "${MERGED_VALIDATION_GRID_CMD[@]}"
 fi
 
-run_cmd "6" "$TAG" bash "$SHERPA_ON_THE_ROCKS_DIR/prepare_runs.sh" validation "$N_VAL_SUBRUNS"
+run_cmd "6" "$TAG" bash "$SHERPA_ON_THE_ROCKS_DIR/prepare_runs.sh" validation "$N_VAL_SUBRUNS" --quiet
 
 if [[ ! -f runs.txt ]]; then
   log_msg "6" "$TAG" "Failed: prepare_runs.sh did not create runs.txt."

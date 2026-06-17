@@ -41,6 +41,6 @@ fi
 
 cd "$INPUT_DIR"
 
-run_cmd "8" "$TAG" bash "$MERGER_SCRIPT" --rm validation "$MERGE_NPROC"
+run_cmd "8" "$TAG" bash "$MERGER_SCRIPT" --rm validation "$MERGE_NPROC" --quiet
 
 log_msg "8" "$TAG" "Completed successfully."

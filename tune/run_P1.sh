@@ -60,7 +60,7 @@ if [[ "$REWEIGHT" == "1" ]]; then
   SPLIT_TARGET="newscan.rew"
 fi
 
-run_cmd "1" "$TAG" bash "$SHERPA_ON_THE_ROCKS_DIR/prepare_runs.sh" "$SPLIT_TARGET" "$N_SUBRUNS"
+run_cmd "1" "$TAG" bash "$SHERPA_ON_THE_ROCKS_DIR/prepare_runs.sh" "$SPLIT_TARGET" "$N_SUBRUNS" --quiet
 
 if [[ ! -f runs.txt ]]; then
   log_msg "1" "$TAG" "Failed: prepare_runs.sh did not create runs.txt."
