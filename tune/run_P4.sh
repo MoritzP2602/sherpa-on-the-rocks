@@ -69,10 +69,10 @@ if [[ -n "${APP_ORDER:-}" ]]; then
   TUNE_DIR="Apprentice/tune.apprentice.${APP_ORDER_SAFE}.dir${DIR_INDEX}"
   TUNE_DIR_ERR="Apprentice/tune.apprentice.err.${APP_ORDER_SAFE}.dir${DIR_INDEX}"
 
-  run_cmd "4" "$TAG" app-build "$SCAN_DIR" --order "$APP_ORDER" -w weights.txt        -o "$APP_JSON" "${APP_BUILD_OPTS[@]}" --quiet
-  run_cmd "4" "$TAG" app-build "$SCAN_DIR" --order "$APP_ORDER" -w weights.txt --errs -o "$ERR_JSON" "${APP_BUILD_OPTS[@]}" --quiet
-  run_cmd "4" "$TAG" app-tune2 weights.txt data.json "$APP_JSON"                "${APP_TUNE2_OPTS[@]}" -p -o "$TUNE_DIR"     --quiet
-  run_cmd "4" "$TAG" app-tune2 weights.txt data.json "$APP_JSON" -e "$ERR_JSON" "${APP_TUNE2_OPTS[@]}" -p -o "$TUNE_DIR_ERR" --quiet
+  run_cmd "4" "$TAG" app-build "$SCAN_DIR" --order "$APP_ORDER" -w weights.txt        -o "$APP_JSON" "${APP_BUILD_OPTS[@]}"
+  run_cmd "4" "$TAG" app-build "$SCAN_DIR" --order "$APP_ORDER" -w weights.txt --errs -o "$ERR_JSON" "${APP_BUILD_OPTS[@]}"
+  run_cmd "4" "$TAG" app-tune2 weights.txt data.json "$APP_JSON"                -o "$TUNE_DIR"     "${APP_TUNE2_OPTS[@]}"
+  run_cmd "4" "$TAG" app-tune2 weights.txt data.json "$APP_JSON" -e "$ERR_JSON" -o "$TUNE_DIR_ERR" "${APP_TUNE2_OPTS[@]}"
 fi
 
 # ---------------------------------------------------------------------------- #
@@ -93,7 +93,7 @@ if [[ -n "${PROF_ORDER:-}" ]]; then
   PROF_TUNE_DIR="Professor/tune.professor.${PROF_ORDER_SAFE}.dir${DIR_INDEX}"
   PROF_TUNE_DIR_ERR="Professor/tune.professor.err.${PROF_ORDER_SAFE}.dir${DIR_INDEX}"
 
-  run_cmd "4" "$TAG" prof2-ipol "$SCAN_DIR" "$IPOL"     --order "$PROF_ORDER" -w weights.txt --ierr none "${PROF_IPOL_OPTS[@]}"
+  run_cmd "4" "$TAG" prof2-ipol "$SCAN_DIR" "$IPOL"     --order "$PROF_ORDER" -w weights.txt --ierr none  "${PROF_IPOL_OPTS[@]}"
   run_cmd "4" "$TAG" prof2-ipol "$SCAN_DIR" "$IPOL_ERR" --order "$PROF_ORDER" -w weights.txt              "${PROF_IPOL_OPTS[@]}"
   run_cmd "4" "$TAG" prof2-tune "$IPOL"     -w weights.txt -R -o "$PROF_TUNE_DIR"     "${PROF_TUNE_OPTS[@]}"
   run_cmd "4" "$TAG" prof2-tune "$IPOL_ERR" -w weights.txt -R -o "$PROF_TUNE_DIR_ERR" "${PROF_TUNE_OPTS[@]}"

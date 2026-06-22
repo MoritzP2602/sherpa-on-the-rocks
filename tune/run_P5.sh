@@ -100,10 +100,10 @@ if [[ -n "${APP_ORDER:-}" ]]; then
   ERR_JSON="$MERGED_DIR/Apprentice/err.${APP_ORDER_SAFE}.json"
   APP_TUNE_MERGED="$MERGED_DIR/Apprentice/tune.apprentice.${APP_ORDER_SAFE}.merged"
   APP_TUNE_MERGED_ERR="$MERGED_DIR/Apprentice/tune.apprentice.err.${APP_ORDER_SAFE}.merged"
-  run_cmd "5" "$TAG" app-build "$SCAN1" "$SCAN2" --order "$APP_ORDER" -w "$APP_W"        -o "$APP_JSON" "${APP_BUILD_OPTS[@]}" --quiet
-  run_cmd "5" "$TAG" app-build "$SCAN1" "$SCAN2" --order "$APP_ORDER" -w "$APP_WE" --errs -o "$ERR_JSON" "${APP_BUILD_OPTS[@]}" --quiet
-  run_cmd "5" "$TAG" app-tune2 "$APP_W"  "$MERGED_DIR/data.json" "$APP_JSON"                "${APP_TUNE2_OPTS[@]}" -p -o "$APP_TUNE_MERGED"     --quiet
-  run_cmd "5" "$TAG" app-tune2 "$APP_WE" "$MERGED_DIR/data.json" "$APP_JSON" -e "$ERR_JSON" "${APP_TUNE2_OPTS[@]}" -p -o "$APP_TUNE_MERGED_ERR" --quiet
+  run_cmd "5" "$TAG" app-build "$SCAN1" "$SCAN2" --order "$APP_ORDER" -w "$APP_W"         -o "$APP_JSON" "${APP_BUILD_OPTS[@]}"
+  run_cmd "5" "$TAG" app-build "$SCAN1" "$SCAN2" --order "$APP_ORDER" -w "$APP_WE" --errs -o "$ERR_JSON" "${APP_BUILD_OPTS[@]}"
+  run_cmd "5" "$TAG" app-tune2 "$APP_W"  "$MERGED_DIR/data.json" "$APP_JSON"                -o "$APP_TUNE_MERGED"     "${APP_TUNE2_OPTS[@]}"
+  run_cmd "5" "$TAG" app-tune2 "$APP_WE" "$MERGED_DIR/data.json" "$APP_JSON" -e "$ERR_JSON" -o "$APP_TUNE_MERGED_ERR" "${APP_TUNE2_OPTS[@]}"
 fi
 
 # ---------------------------------------------------------------------------- #
