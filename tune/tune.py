@@ -522,7 +522,14 @@ def handle_resume(current_state: dict) -> tuple[dict, Path, bool, set[str]]:
             else:
                 target = croot / job
             if target.exists():
-                shutil.rmtree(target)
+                failed = False
+                def _on_rmtree_error(func, path, exc_info):
+                    nonlocal failed
+                    failed = True
+                shutil.rmtree(target, onerror=_on_rmtree_error)
+                if failed:
+                    print(f"Couldn't remove all files from {target} "
+                          f"(files may still be in use by running jobs); continuing.")
             target.mkdir(parents=True, exist_ok=True)
         return
 
