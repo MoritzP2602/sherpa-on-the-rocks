@@ -401,6 +401,9 @@ def build_state(cfg, config_path: Path):
         "mpi_module"              : str(cfg.get("MPI_MODULE", "mpi/openmpi-x86_64")).strip(),
         "numba_disable_jit"       : parse_on_off(cfg.get("NUMBA_DISABLE_JIT", "off"), "NUMBA_DISABLE_JIT"),
         "email"                   : str(cfg.get("EMAIL", "")).strip(),
+        "condor_ids_file"         : str((master_dir / "condor_ids.json").resolve()),
+        "phase_times_file"        : str((master_dir / "phase_times.json").resolve()),
+        "dag_path"                : str((master_dir / "tune.dag").resolve()),
         "job_dir"                 : str(job_dir),
         "master_dir"              : str(master_dir),
         "condor_output"           : condor_output,
@@ -425,9 +428,6 @@ def build_state(cfg, config_path: Path):
         "P7_maxruntime"           : int(cfg.get("PHASE7_MAXRUNTIME", 86400)),
         "P8_maxruntime"           : int(cfg.get("PHASE8_MAXRUNTIME", 86400)),
         "P9_maxruntime"           : int(cfg.get("PHASE9_MAXRUNTIME", 1800)),
-        "condor_ids_file"         : str((master_dir / "condor_ids.json").resolve()),
-        "phase_times_file"        : str((master_dir / "phase_times.json").resolve()),
-        "dag_path"                : str((master_dir / "tune.dag").resolve()),
     }
     return state, grid_warning
 
@@ -505,12 +505,15 @@ def handle_resume(current_state: dict) -> tuple[dict, Path, bool, set[str]]:
     def comparable_state(state: dict) -> dict:
         normalized = json.loads(json.dumps(state))
         normalized.pop("created_at", None)
-        normalized.pop("dag_cluster_id", None)
         normalized.pop("config_path", None)
+        normalized.pop("email", None)
         normalized.pop("condor_ids_file", None)
         normalized.pop("phase_times_file", None)
         normalized.pop("dag_path", None)
-        normalized.pop("email", None)
+        for backend in ("apprentice", "professor"):
+            block = normalized.get(backend)
+            if isinstance(block, dict):
+                normalized[backend] = {"order": block["order"]} if "order" in block else {}
         return normalized
     
     def reset_phase_output(state: dict, jobs: set[str]) -> None:
