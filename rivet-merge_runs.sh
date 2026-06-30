@@ -4,6 +4,7 @@ REMOVE_SUBDIRS=false
 CHUNK_SIZE=0
 NMAX=-1
 QUIET=false
+GZ=false
 OUTPUT_DIR=""
 POSITIONAL=()
 
@@ -28,6 +29,9 @@ while [ $# -gt 0 ]; do
         -q|--quiet)
             QUIET=true
             shift ;;
+        --gz)
+            GZ=true
+            shift ;;
         --output|-o)
             shift
             if [ -z "${1-}" ]; then
@@ -42,13 +46,14 @@ done
 set -- "${POSITIONAL[@]}"
 
 if [ $# -lt 1 ]; then
-    echo "Usage: $0 [--rm] [--chunked N] [--nmax N] [--output|-o DIR] <folder1> [<folder2> ...] [nproc]"
+    echo "Usage: $0 [--rm] [--chunked N] [--nmax N] [--quiet] [--gz] [--output|-o DIR] <folder1> [<folder2> ...] [nproc]"
     echo "  <folder>        : Directory containing subfolders with YODA files."
     echo "  [nproc]         : Number of parallel jobs (default: 4). Use 1 for sequential processing."
-    echo "  --rm            : (Optional) Remove merged subdirectories after successful merge to free space."
+    echo "  --rm            : (Optional) Remove merged subdirectories after successful merge to free space"
     echo "  --chunked N     : (Optional) Merge in chunks of N files (reduces memory usage). Processes nproc chunks in parallel."
     echo "  --nmax N        : (Optional) Maximum number of yoda files to merge per directory (default: all)."
     echo "  --quiet|-q      : (Optional) Call rivet-merge with --quiet, supress messages about removed subdirectories."
+    echo "  --gz            : (Optional) Write gzip-compressed output (.yoda.gz)"
     echo "  --output|-o DIR : (Optional) Output directory for merged files (preserves input structure)."
     echo "If subdirectories have their own subfolders, merges all .yoda/.yoda.gz files from nested subdirectories into a single .yoda file in each subdirectory."
     echo "If subdirectories do not have subfolders, merges all .yoda/.yoda.gz files from all subdirectories into a single .yoda file in the parent folder."
@@ -88,6 +93,12 @@ if [ -n "$OUTPUT_DIR" ] && [ ${#FOLDERS[@]} -ne 1 ]; then
     exit 1
 fi
 
+if [ "$GZ" = true ]; then
+    GZ_SUFFIX=".gz"
+else
+    GZ_SUFFIX=""
+fi
+
 rivet_merge() {
     local outfile="${!#}"
     local files=("${@:1:$#-1}")
@@ -106,10 +117,10 @@ merge_dir() {
     if [ -n "$OUTPUT_DIR" ]; then
         rel_path="${dir#$BASE_INPUT_DIR/}"
         out_dir="$OUTPUT_DIR/$rel_path"
-        OUTFILE="$out_dir/${YODA}.yoda"
+        OUTFILE="$out_dir/${YODA}.yoda${GZ_SUFFIX}"
     else
         out_dir="$dir"
-        OUTFILE="$dir/${YODA}.yoda"
+        OUTFILE="$dir/${YODA}.yoda${GZ_SUFFIX}"
     fi
     
     if [ -f "$OUTFILE" ]; then
@@ -155,11 +166,11 @@ merge_flat() {
     if [ -n "$OUTPUT_DIR" ]; then
         out_dir="$OUTPUT_DIR"
         YODA=$(basename "$OUTPUT_DIR")
-        OUTFILE="$out_dir/${YODA}.yoda"
+        OUTFILE="$out_dir/${YODA}.yoda${GZ_SUFFIX}"
     else
         out_dir="$PREFIX"
         YODA=$(basename "$PREFIX")
-        OUTFILE="$PREFIX/${YODA}.yoda"
+        OUTFILE="$PREFIX/${YODA}.yoda${GZ_SUFFIX}"
     fi
     
     if [ -f "$OUTFILE" ]; then
@@ -304,6 +315,7 @@ export CHUNK_SIZE
 export NPROC
 export NMAX
 export QUIET
+export GZ_SUFFIX
 export OUTPUT_DIR
 export BASE_INPUT_DIR
 
@@ -382,6 +394,7 @@ echo "  total targets  : $TOTAL_DIRS"
 echo "  parallel jobs  : $NPROC"
 echo "  chunked mode   : $CHUNKED_DISPLAY"
 echo "  nmax           : $NMAX_DISPLAY"
+echo "  gzip output    : $GZ"
 echo "  remove subdirs : $REMOVE_SUBDIRS_DISPLAY"
 echo "  output dir     : $OUTPUT_DIR_DISPLAY"
 echo ""
