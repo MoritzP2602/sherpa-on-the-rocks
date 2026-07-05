@@ -57,7 +57,7 @@ if [[ "${VALIDATION_ONLY_MERGED:-0}" != "1" ]]; then
     require_backend_tunes "$INPUT_DIR" Professor tune.professor "$PROF_ORDER_SAFE" "dir${DIR_INDEX}"
   fi
 fi
-if [[ "$N_INPUT_DIRS" == "2" ]]; then
+if [[ "$N_INPUT_DIRS" -ge 2 ]]; then
   if [[ -n "${APP_ORDER:-}" ]]; then
     require_backend_tunes "$MERGED_DIR" Apprentice tune.apprentice "$APP_ORDER_SAFE" merged
   fi
@@ -75,7 +75,7 @@ if [[ "${VALIDATION_ONLY_MERGED:-0}" != "1" ]]; then
   if [[ -n "${PROF_ORDER:-}" ]]; then add_validation_grid "$INPUT_DIR" Professor tune.professor; fi
 fi
 
-if [[ "$N_INPUT_DIRS" == "2" ]]; then
+if [[ "$N_INPUT_DIRS" -ge 2 ]]; then
   if [[ -n "${APP_ORDER:-}" ]]; then add_validation_grid "$MERGED_DIR" Apprentice tune.apprentice; fi
   if [[ -n "${PROF_ORDER:-}" ]]; then add_validation_grid "$MERGED_DIR" Professor tune.professor; fi
 fi

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import functools
 import json
 import math
 import os
@@ -80,16 +81,38 @@ def stack_json_values(left, right):
     return [left, right]
 
 
-def write_stacked_json_values(input_dirs: list[Path], merged_dir: Path) -> None:
-    if len(input_dirs) != 2:
+def warn_refdata_overlap(datasets: list) -> None:
+    bin_owners: dict[str, list[int]] = {}
+    for idx, data in enumerate(datasets, start=1):
+        if not isinstance(data, dict):
+            continue
+        for binid in data:
+            bin_owners.setdefault(str(binid), []).append(idx)
+    overlaps: dict[tuple[str, tuple[int, ...]], int] = {}
+    for binid, owners in bin_owners.items():
+        if len(owners) < 2:
+            continue
+        histname = binid.rsplit("#", 1)[0]
+        key = (histname, tuple(owners))
+        overlaps[key] = overlaps.get(key, 0) + 1
+    if not overlaps:
         return
-    left_path = input_dirs[0] / "data.json"
-    right_path = input_dirs[1] / "data.json"
+    print("WARNING: reference data overlap in combined data.json:")
+    for (histname, owners), n_bins in sorted(overlaps.items()):
+        dirs = ", ".join(f"INPUT_DIR{i}" for i in owners)
+        print(f"  {histname} ({n_bins} bin{'s' if n_bins != 1 else ''}) present in {dirs}")
+    print()
+
+
+def write_stacked_json_values(input_dirs: list[Path], merged_dir: Path) -> None:
+    if len(input_dirs) < 2:
+        return
     target_path = merged_dir / "data.json"
 
-    left_data = json.loads(left_path.read_text(encoding="utf-8"))
-    right_data = json.loads(right_path.read_text(encoding="utf-8"))
-    stacked = stack_json_values(left_data, right_data)
+    datasets = [json.loads((idir / "data.json").read_text(encoding="utf-8"))
+                for idir in input_dirs]
+    warn_refdata_overlap(datasets)
+    stacked = functools.reduce(stack_json_values, datasets)
     target_path.write_text(json.dumps(stacked, indent=2), encoding="utf-8")
 
 
@@ -195,10 +218,20 @@ def parse_backend_options(block: dict, key: str) -> str:
     return str(value).strip()
 
 def parse_input_dir_blocks(cfg, config_path: Path):
+    indices = sorted(int(m.group(1)) for key in cfg
+                     if (m := re.fullmatch(r"INPUT_DIR(\d+)", str(key))))
+    if not indices:
+        raise KeyError("Missing required key: INPUT_DIR1")
+    if indices[0] < 1:
+        raise KeyError(f"INPUT_DIR numbering starts at 1, got INPUT_DIR{indices[0]}")
+    expected = list(range(1, len(indices) + 1))
+    if indices != expected:
+        missing = next(i for i in expected if i not in indices)
+        raise KeyError(f"INPUT_DIR keys must be numbered contiguously from 1: "
+                       f"found INPUT_DIR{max(indices)} but INPUT_DIR{missing} is missing")
     blocks = []
-    for key in ("INPUT_DIR1", "INPUT_DIR2"):
-        if key not in cfg:
-            continue
+    for idx in indices:
+        key = f"INPUT_DIR{idx}"
         block = cfg[key]
         if not isinstance(block, dict):
             raise ValueError(f"{key} must be a mapping")
@@ -218,8 +251,6 @@ def parse_input_dir_blocks(cfg, config_path: Path):
                 "events_validation_raw": events_validation_raw,
                 "reweight"             : parse_on_off(block.get("REWEIGHTING", "off"), f"{key}.REWEIGHTING"),
                       })
-    if not blocks:
-        raise KeyError("Missing required key: INPUT_DIR1")
     return blocks
 
 
@@ -246,8 +277,6 @@ def build_state(cfg, config_path: Path):
     input_dir_blocks = parse_input_dir_blocks(cfg, config_path)
     input_dirs = [b["path"] for b in input_dir_blocks]
     n_dirs = len(input_dirs)
-    if n_dirs not in (1, 2):
-        raise ValueError("Provide one or two input directories via INPUT_DIR1[/INPUT_DIR2]")
 
     for idx, idir in enumerate(input_dirs, start=1):
         if not idir.exists() or not idir.is_dir():
@@ -266,13 +295,13 @@ def build_state(cfg, config_path: Path):
         raise ValueError("MERGE_MODE must be 'rivet' or 'yoda'")
 
     combine_mode = str(cfg.get("COMBINE_MODE", "weighted")).strip().lower()
-    if n_dirs == 2 and combine_mode not in {"weighted", "equal"}:
-        raise ValueError("COMBINE_MODE must be 'weighted' or 'equal' for two-input tunes")
+    if n_dirs >= 2 and combine_mode not in {"weighted", "equal"}:
+        raise ValueError("COMBINE_MODE must be 'weighted' or 'equal' for multi-input tunes")
 
     validation_only_err    = parse_on_off(cfg.get("VALIDATION_ONLY_ERR", "off"), "VALIDATION_ONLY_ERR")
     validation_only_merged = parse_on_off(cfg.get("VALIDATION_ONLY_MERGED", "off"), "VALIDATION_ONLY_MERGED")
-    if validation_only_merged and n_dirs != 2:
-        raise ValueError("VALIDATION_ONLY_MERGED requires two input directories (no merged tune exists for a single input)")
+    if validation_only_merged and n_dirs < 2:
+        raise ValueError("VALIDATION_ONLY_MERGED requires at least two input directories (no merged tune exists for a single input)")
 
     max_cpus = int(cfg.get("MAX_CPUS", 8))
     if max_cpus <= 0:
@@ -381,7 +410,7 @@ def build_state(cfg, config_path: Path):
     else:
         master_dir = (input_dirs[0] / "master").resolve()
     condor_output = str((master_dir / "condor_output").resolve())
-    if n_dirs == 2:
+    if n_dirs >= 2:
         if "MERGED_DIR" in cfg and str(cfg["MERGED_DIR"]).strip():
             merged_dir = str(resolve_cfg_path(cfg["MERGED_DIR"], config_path))
         else:
@@ -436,7 +465,7 @@ def dag_jobs(n_dirs: int) -> list[str]:
     jobs: list[str] = []
     for i in range(1, n_dirs + 1):
         jobs.extend([f"P1_dir{i}", f"P2_dir{i}", f"P3_dir{i}", f"P4_dir{i}"])
-    if n_dirs == 2:
+    if n_dirs >= 2:
         jobs.append("P5")
     for i in range(1, n_dirs + 1):
         jobs.extend([f"P6_dir{i}", f"P7_dir{i}", f"P8_dir{i}"])
@@ -452,33 +481,26 @@ def dag_completed_jobs(phase_times: dict, n_dirs: int) -> set[str]:
 
 def dag_dependencies(n_dirs: int) -> list[tuple[str, str]]:
     edges: list[tuple[str, str]] = []
-    if n_dirs == 2:
-        edges.append(("P1_dir1", "P1_dir2"))
+    for i in range(2, n_dirs + 1):
+        edges.append(("P1_dir1", f"P1_dir{i}"))
     for i in range(1, n_dirs + 1):
         edges.extend([
                 (f"P1_dir{i}", f"P2_dir{i}"),
                 (f"P2_dir{i}", f"P3_dir{i}"),
                 (f"P3_dir{i}", f"P4_dir{i}"),
                      ])
-    if n_dirs == 2:
-        edges.extend([
-                ("P4_dir1", "P5"),
-                ("P4_dir2", "P5"),
-                ("P5", "P6_dir1"),
-                ("P5", "P6_dir2"),
-                ("P6_dir1", "P7_dir1"),
-                ("P6_dir2", "P7_dir2"),
-                ("P7_dir1", "P8_dir1"),
-                ("P7_dir2", "P8_dir2"),
-                ("P8_dir1", "P9"),
-                ("P8_dir2", "P9"),
-                     ])
+    if n_dirs >= 2:
+        for i in range(1, n_dirs + 1):
+            edges.append((f"P4_dir{i}", "P5"))
+        for i in range(1, n_dirs + 1):
+            edges.append(("P5", f"P6_dir{i}"))
     else:
+        edges.append(("P4_dir1", "P6_dir1"))
+    for i in range(1, n_dirs + 1):
         edges.extend([
-                ("P4_dir1", "P6_dir1"),
-                ("P6_dir1", "P7_dir1"),
-                ("P7_dir1", "P8_dir1"),
-                ("P8_dir1", "P9"),
+                (f"P6_dir{i}", f"P7_dir{i}"),
+                (f"P7_dir{i}", f"P8_dir{i}"),
+                (f"P8_dir{i}", "P9"),
                      ])
     return edges
 
@@ -844,7 +866,7 @@ def main():
         for k, v in prof_rows:
             print(f"    - {k:<{pw}} : {v}")
         print()
-    if n_dirs == 2:
+    if n_dirs >= 2:
         print("  Merged weights settings:")
         print(f"    - COMBINE_MODE (combine_weights.py) : {state['combine_mode']}")
         print()

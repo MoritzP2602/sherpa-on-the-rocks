@@ -46,7 +46,7 @@ Phases:
 - **P2**: generate tuning events with Sherpa
 - **P3**: merge tuning outputs
 - **P4**: train surrogate and run optimization (Apprentice and/or Professor)
-- **P5**: combine two-process tuning results (only for 2-input setups)
+- **P5**: combine multi-process tuning results (only for multi-input setups)
 - **P6**: create validation grid from tune result
 - **P7**: generate validation events with Sherpa
 - **P8**: merge validation outputs

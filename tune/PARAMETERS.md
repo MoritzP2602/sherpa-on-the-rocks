@@ -10,9 +10,10 @@
 - **Optional Fields**:
   - `REWEIGHTING`: Whether to use reweighting for the entire event generation (default: "off", values: on/off/true/false)
 
-### INPUT_DIR2
-- **Required Fields** (when present):
-  - `PATH`: Path to the second input directory
+### INPUT_DIR2, INPUT_DIR3, ... (INPUT_DIRX)
+- Any number of additional input directories (processes) may be given as `INPUT_DIR2`, `INPUT_DIR3`, ... The numbering must be contiguous and start at 1: e.g. providing `INPUT_DIR1` and `INPUT_DIR3` without `INPUT_DIR2` is an error.
+- **Required Fields** (per block, when present):
+  - `PATH`: Path to the input directory
   - `EVENTS`: Number of events for tuning
   - `EVENTS_VALIDATION`: Number of events for validation
 - **Optional Fields**:
@@ -46,7 +47,7 @@
 
 ### PATTERN
 - **Type**: String
-- **Condition**: **Required** if `INPUT_DIR1.REWEIGHTING` or `INPUT_DIR2.REWEIGHTING` is `on`.
+- **Condition**: **Required** if any `INPUT_DIRX.REWEIGHTING` is `on`.
 - **Description**: Pattern passed to `app-tools-split_reweighting` in phase P4 to split reweighted runs.
 
 ### RIVET_ENV_SCRIPT
@@ -107,8 +108,8 @@
 
 ### MERGED_DIR
 - **Type**: Path
-- **Default**: `INPUT_DIR1/merged` (only for two-input runs)
-- **Description**: Directory for combined reference data and tune results when using two input directories. Only used if `INPUT_DIR2` is specified.
+- **Default**: `INPUT_DIR1/merged` (only for multi-input runs)
+- **Description**: Directory for combined reference data and tune results when using multiple input directories. Only used if more than one `INPUT_DIRX` is specified.
 
 ### GRID_SAMPLING
 - **Type**: String
@@ -125,8 +126,8 @@
 ### COMBINE_MODE
 - **Type**: String
 - **Default**: `weighted`
-- **Valid Values**: `weighted`, `equal` (only for two-input runs)
-- **Description**: Method for combining tuning results from two processes. Applied per backend in P5. If `weighted` is used, the weights are automatically rescaled to balance the contribution to the global chi2 of each process, `equal` rescales all weights by 1.0.
+- **Valid Values**: `weighted`, `equal` (only for multi-input runs)
+- **Description**: Method for combining tuning results from all processes. Applied per backend in P5. If `weighted` is used, the weights are automatically rescaled to balance the contribution to the global chi2 of each process, `equal` rescales all weights by 1.0.
 
 ### VALIDATION_ONLY_ERR
 - **Type**: Boolean-like string
@@ -138,7 +139,7 @@
 - **Type**: Boolean-like string
 - **Default**: `off`
 - **Valid Values**: `on`, `off`, `true`, `false`
-- **Condition**: Requires two input directories (errors at startup otherwise, since no merged tune exists for a single input).
+- **Condition**: Requires at least two input directories (errors at startup otherwise, since no merged tune exists for a single input).
 - **Description**: If `on`, the validation grid (phase P6) is built only from the merged tune results (`*.merged`), skipping the per-input-directory tune results. If both `VALIDATION_ONLY_ERR` and `VALIDATION_ONLY_MERGED` are `on`, only the merged error tune seeds the validation grid (a single validation subdir).
 
 ### MAX_CPUS

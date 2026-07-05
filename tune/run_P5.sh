@@ -24,50 +24,53 @@ fi
 
 load_global_state "$STATE_JSON"
 
-if [[ $N_INPUT_DIRS != 2 ]]; then
-  log_msg "5" "$TAG" "Phase 5 requires exactly two input dirs."
+if [[ "$N_INPUT_DIRS" -lt 2 ]]; then
+  log_msg "5" "$TAG" "Phase 5 requires at least two input dirs."
   exit 1
 fi
 
-DIR1="$INPUT_DIR_1"
-DIR2="$INPUT_DIR_2"
-
-SCAN1="$DIR1/newscan"
-SCAN2="$DIR2/newscan"
-if [[ "$REWEIGHT_1" == "1" ]]; then
-  SCAN1="$DIR1/newscan.rew.split"
-fi
-if [[ "$REWEIGHT_2" == "1" ]]; then
-  SCAN2="$DIR2/newscan.rew.split"
-fi
-
-REQUIRED_INPUTS=("$DIR1/weights.txt"
-                 "$DIR2/weights.txt"
-                 "$SCAN1"
-                 "$SCAN2")
+DIRS=()
+WEIGHTS=()
+SCANS=()
+REQUIRED_INPUTS=()
+for idx in $(seq 1 "$N_INPUT_DIRS"); do
+  DIR_VAR="INPUT_DIR_${idx}"
+  REW_VAR="REWEIGHT_${idx}"
+  DIRS[idx]="${!DIR_VAR}"
+  WEIGHTS[idx]="${DIRS[idx]}/weights.txt"
+  SCANS[idx]="${DIRS[idx]}/newscan"
+  if [[ "${!REW_VAR}" == "1" ]]; then
+    SCANS[idx]="${DIRS[idx]}/newscan.rew.split"
+  fi
+  REQUIRED_INPUTS+=("${WEIGHTS[idx]}" "${SCANS[idx]}")
+done
 
 if [[ -n "${APP_ORDER:-}" ]]; then
-  APP_TUNE1="$DIR1/Apprentice/tune.apprentice.${APP_ORDER_SAFE}.dir1"
-  APP_TUNE2="$DIR2/Apprentice/tune.apprentice.${APP_ORDER_SAFE}.dir2"
-  APP_TUNE1_ERR="$DIR1/Apprentice/tune.apprentice.err.${APP_ORDER_SAFE}.dir1"
-  APP_TUNE2_ERR="$DIR2/Apprentice/tune.apprentice.err.${APP_ORDER_SAFE}.dir2"
+  APP_TUNES=()
+  APP_TUNES_ERR=()
+  for idx in $(seq 1 "$N_INPUT_DIRS"); do
+    APP_TUNES[idx]="${DIRS[idx]}/Apprentice/tune.apprentice.${APP_ORDER_SAFE}.dir${idx}"
+    APP_TUNES_ERR[idx]="${DIRS[idx]}/Apprentice/tune.apprentice.err.${APP_ORDER_SAFE}.dir${idx}"
+  done
   REQUIRED_INPUTS+=("$MERGED_DIR/data.json")
   if [[ "$COMBINE_MODE" == "weighted" ]]; then
-    REQUIRED_INPUTS+=("$APP_TUNE1" "$APP_TUNE2" "$APP_TUNE1_ERR" "$APP_TUNE2_ERR")
+    REQUIRED_INPUTS+=("${APP_TUNES[@]}" "${APP_TUNES_ERR[@]}")
   fi
 fi
 if [[ -n "${PROF_ORDER:-}" ]]; then
-  PROF_IPOL1="$DIR1/Professor/ipol.${PROF_ORDER_SAFE}.dat"
-  PROF_IPOL2="$DIR2/Professor/ipol.${PROF_ORDER_SAFE}.dat"
-  PROF_IPOL1_ERR="$DIR1/Professor/ipol.err.${PROF_ORDER_SAFE}.dat"
-  PROF_IPOL2_ERR="$DIR2/Professor/ipol.err.${PROF_ORDER_SAFE}.dat"
-  PROF_TUNE1="$DIR1/Professor/tune.professor.${PROF_ORDER_SAFE}.dir1"
-  PROF_TUNE2="$DIR2/Professor/tune.professor.${PROF_ORDER_SAFE}.dir2"
-  PROF_TUNE1_ERR="$DIR1/Professor/tune.professor.err.${PROF_ORDER_SAFE}.dir1"
-  PROF_TUNE2_ERR="$DIR2/Professor/tune.professor.err.${PROF_ORDER_SAFE}.dir2"
-  REQUIRED_INPUTS+=("$PROF_IPOL1" "$PROF_IPOL2" "$PROF_IPOL1_ERR" "$PROF_IPOL2_ERR")
+  PROF_IPOLS=()
+  PROF_IPOLS_ERR=()
+  PROF_TUNES=()
+  PROF_TUNES_ERR=()
+  for idx in $(seq 1 "$N_INPUT_DIRS"); do
+    PROF_IPOLS[idx]="${DIRS[idx]}/Professor/ipol.${PROF_ORDER_SAFE}.dat"
+    PROF_IPOLS_ERR[idx]="${DIRS[idx]}/Professor/ipol.err.${PROF_ORDER_SAFE}.dat"
+    PROF_TUNES[idx]="${DIRS[idx]}/Professor/tune.professor.${PROF_ORDER_SAFE}.dir${idx}"
+    PROF_TUNES_ERR[idx]="${DIRS[idx]}/Professor/tune.professor.err.${PROF_ORDER_SAFE}.dir${idx}"
+  done
+  REQUIRED_INPUTS+=("${PROF_IPOLS[@]}" "${PROF_IPOLS_ERR[@]}")
   if [[ "$COMBINE_MODE" == "weighted" ]]; then
-    REQUIRED_INPUTS+=("$PROF_TUNE1" "$PROF_TUNE2" "$PROF_TUNE1_ERR" "$PROF_TUNE2_ERR")
+    REQUIRED_INPUTS+=("${PROF_TUNES[@]}" "${PROF_TUNES_ERR[@]}")
   fi
 fi
 require_inputs "5" "$TAG" "${REQUIRED_INPUTS[@]}"
@@ -88,20 +91,26 @@ if [[ -n "${APP_ORDER:-}" ]]; then
   mkdir -p "$MERGED_DIR/Apprentice"
   APP_W="$MERGED_DIR/Apprentice/weights.txt"
   APP_WE="$MERGED_DIR/Apprentice/err.weights.txt"
-  if [[ "$COMBINE_MODE" == "weighted" ]]; then
-    run_cmd "5" "$TAG" app-tools-combine_weights "$DIR1/weights.txt" "$APP_TUNE1"     "$DIR2/weights.txt" "$APP_TUNE2"     -o "$APP_W"
-    run_cmd "5" "$TAG" app-tools-combine_weights "$DIR1/weights.txt" "$APP_TUNE1_ERR" "$DIR2/weights.txt" "$APP_TUNE2_ERR" -o "$APP_WE"
-  else
-    run_cmd "5" "$TAG" app-tools-combine_weights "$DIR1/weights.txt" 1.0 "$DIR2/weights.txt" 1.0 -o "$APP_W"
-    run_cmd "5" "$TAG" app-tools-combine_weights "$DIR1/weights.txt" 1.0 "$DIR2/weights.txt" 1.0 -o "$APP_WE"
-  fi
+  APP_W_ARGS=()
+  APP_WE_ARGS=()
+  for idx in $(seq 1 "$N_INPUT_DIRS"); do
+    if [[ "$COMBINE_MODE" == "weighted" ]]; then
+      APP_W_ARGS+=("${WEIGHTS[idx]}" "${APP_TUNES[idx]}")
+      APP_WE_ARGS+=("${WEIGHTS[idx]}" "${APP_TUNES_ERR[idx]}")
+    else
+      APP_W_ARGS+=("${WEIGHTS[idx]}" 1.0)
+      APP_WE_ARGS+=("${WEIGHTS[idx]}" 1.0)
+    fi
+  done
+  run_cmd "5" "$TAG" app-tools-combine_weights "${APP_W_ARGS[@]}"  -o "$APP_W"
+  run_cmd "5" "$TAG" app-tools-combine_weights "${APP_WE_ARGS[@]}" -o "$APP_WE"
 
   APP_JSON="$MERGED_DIR/Apprentice/app.${APP_ORDER_SAFE}.json"
   ERR_JSON="$MERGED_DIR/Apprentice/err.${APP_ORDER_SAFE}.json"
   APP_TUNE_MERGED="$MERGED_DIR/Apprentice/tune.apprentice.${APP_ORDER_SAFE}.merged"
   APP_TUNE_MERGED_ERR="$MERGED_DIR/Apprentice/tune.apprentice.err.${APP_ORDER_SAFE}.merged"
-  run_cmd "5" "$TAG" app-build "$SCAN1" "$SCAN2" --order "$APP_ORDER" -w "$APP_W"         -o "$APP_JSON" "${APP_BUILD_OPTS[@]}"
-  run_cmd "5" "$TAG" app-build "$SCAN1" "$SCAN2" --order "$APP_ORDER" -w "$APP_WE" --errs -o "$ERR_JSON" "${APP_BUILD_OPTS[@]}"
+  run_cmd "5" "$TAG" app-build "${SCANS[@]}" --order "$APP_ORDER" -w "$APP_W"         -o "$APP_JSON" "${APP_BUILD_OPTS[@]}"
+  run_cmd "5" "$TAG" app-build "${SCANS[@]}" --order "$APP_ORDER" -w "$APP_WE" --errs -o "$ERR_JSON" "${APP_BUILD_OPTS[@]}"
   run_cmd "5" "$TAG" app-tune2 "$APP_W"  "$MERGED_DIR/data.json" "$APP_JSON"                -o "$APP_TUNE_MERGED"     "${APP_TUNE2_OPTS[@]}"
   run_cmd "5" "$TAG" app-tune2 "$APP_WE" "$MERGED_DIR/data.json" "$APP_JSON" -e "$ERR_JSON" -o "$APP_TUNE_MERGED_ERR" "${APP_TUNE2_OPTS[@]}"
 fi
@@ -118,18 +127,24 @@ if [[ -n "${PROF_ORDER:-}" ]]; then
   mkdir -p "$MERGED_DIR/Professor"
   PROF_W="$MERGED_DIR/Professor/weights.txt"
   PROF_WE="$MERGED_DIR/Professor/err.weights.txt"
-  if [[ "$COMBINE_MODE" == "weighted" ]]; then
-    run_cmd "5" "$TAG" app-tools-combine_weights "$DIR1/weights.txt" "$PROF_TUNE1"     "$DIR2/weights.txt" "$PROF_TUNE2"     -o "$PROF_W"
-    run_cmd "5" "$TAG" app-tools-combine_weights "$DIR1/weights.txt" "$PROF_TUNE1_ERR" "$DIR2/weights.txt" "$PROF_TUNE2_ERR" -o "$PROF_WE"
-  else
-    run_cmd "5" "$TAG" app-tools-combine_weights "$DIR1/weights.txt" 1.0 "$DIR2/weights.txt" 1.0 -o "$PROF_W"
-    run_cmd "5" "$TAG" app-tools-combine_weights "$DIR1/weights.txt" 1.0 "$DIR2/weights.txt" 1.0 -o "$PROF_WE"
-  fi
+  PROF_W_ARGS=()
+  PROF_WE_ARGS=()
+  for idx in $(seq 1 "$N_INPUT_DIRS"); do
+    if [[ "$COMBINE_MODE" == "weighted" ]]; then
+      PROF_W_ARGS+=("${WEIGHTS[idx]}" "${PROF_TUNES[idx]}")
+      PROF_WE_ARGS+=("${WEIGHTS[idx]}" "${PROF_TUNES_ERR[idx]}")
+    else
+      PROF_W_ARGS+=("${WEIGHTS[idx]}" 1.0)
+      PROF_WE_ARGS+=("${WEIGHTS[idx]}" 1.0)
+    fi
+  done
+  run_cmd "5" "$TAG" app-tools-combine_weights "${PROF_W_ARGS[@]}"  -o "$PROF_W"
+  run_cmd "5" "$TAG" app-tools-combine_weights "${PROF_WE_ARGS[@]}" -o "$PROF_WE"
 
   PROF_TUNE_MERGED="$MERGED_DIR/Professor/tune.professor.${PROF_ORDER_SAFE}.merged"
   PROF_TUNE_MERGED_ERR="$MERGED_DIR/Professor/tune.professor.err.${PROF_ORDER_SAFE}.merged"
-  run_cmd "5" "$TAG" prof2-tune "$PROF_IPOL1"     "$PROF_IPOL2"     -w "$PROF_W"  -R -o "$PROF_TUNE_MERGED"     "${PROF_TUNE_OPTS[@]}"
-  run_cmd "5" "$TAG" prof2-tune "$PROF_IPOL1_ERR" "$PROF_IPOL2_ERR" -w "$PROF_WE" -R -o "$PROF_TUNE_MERGED_ERR" "${PROF_TUNE_OPTS[@]}"
+  run_cmd "5" "$TAG" prof2-tune "${PROF_IPOLS[@]}"     -w "$PROF_W"  -R -o "$PROF_TUNE_MERGED"     "${PROF_TUNE_OPTS[@]}"
+  run_cmd "5" "$TAG" prof2-tune "${PROF_IPOLS_ERR[@]}" -w "$PROF_WE" -R -o "$PROF_TUNE_MERGED_ERR" "${PROF_TUNE_OPTS[@]}"
 fi
 
 log_msg "5" "$TAG" "Completed successfully."
