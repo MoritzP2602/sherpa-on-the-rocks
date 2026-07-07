@@ -25,17 +25,7 @@ If you choose to move `sherpa-on-the-rocks` to a different directory, adjust all
 
 Note: It may be convenient to also keep a copy of `sherpa-on-the-rocks` in your local home directory, so you can run the excat same commands on your local machine and on the cluster, without having to adjust the paths in the commands below (run `cp -r /net/theorie/rocks/$USER/sherpa-on-the-rocks ~/`).
 
-### 2. Configure the Sherpa installation path
-
-Edit `run_sherpa.sh` and set the path to your Sherpa binary (relative to your ROCKS home directory) near the top of the file.
-
-Example:
-
-```bash
-SHERPA_INSTALLATION="~/Programs/sherpa/install/bin/Sherpa"
-```
-
-### 3. Configure the HTCondor submit file
+### 2. Configure the HTCondor submit file
 
 Edit `sherpa.jdf` and replace `YOUR_USERNAME` with your actual ROCKS username on the second line.
 
@@ -45,9 +35,17 @@ Example:
 USERNAME    = moritz.pabst
 ```
 
+Set the path to your Sherpa binary (relative to your ROCKS home directory).
+
+Example:
+
+```bash
+SHERPA      = /home/$(USERNAME)/Programs/sherpa/install/bin/Sherpa
+```
+
 If you moved `sherpa-on-the-rocks` to a different location in step 1.1, make sure to additionally update the path to `run_sherpa.sh` in the argument section.
 
-### 4. (Optional) Make the scripts executable
+### 3. (Optional) Make the scripts executable
 
 You can make the scripts executable to run them without explicitly calling `bash`/`python3`:
 

@@ -2,7 +2,8 @@ Executable  = /bin/bash
 USERNAME    = YOUR_USERNAME
 LOGDIR      = condor_output
 MAXRUNTIME  = 86400
-Arguments   = /home/$(USERNAME)/sherpa-on-the-rocks/run_sherpa.sh $(folder) $(LOGDIR) $(Cluster) $(Process) $(MAXRUNTIME)
+SHERPA      = /PATH/TO/SHERPA/INSTALLATION/bin/Sherpa
+Arguments   = /home/$(USERNAME)/sherpa-on-the-rocks/run_sherpa.sh $(SHERPA) $(folder) $(LOGDIR) $(Cluster) $(Process) $(MAXRUNTIME)
 +MaxRuntime = $(MAXRUNTIME)
 max_idle    = 1000
 

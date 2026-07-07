@@ -184,10 +184,12 @@ fi
 
 cd "$TMPDIR"
 
-timeout -s TERM "$TIMEOUT" "$SHERPA_BINARY" -f "$YAML" -R "$SEED" || {
+sherpa_start_epoch=$(date +%s)
+timeout -s TERM -k 60 "$TIMEOUT" "$SHERPA_BINARY" -f "$YAML" -R "$SEED" || {
   exit_code=$?
+  sherpa_elapsed=$(( $(date +%s) - sherpa_start_epoch ))
   last_event=$(get_last_event_count)
-  if [[ $exit_code -eq 124 ]]; then
+  if { [[ $exit_code -eq 124 ]] || [[ $exit_code -eq 137 ]]; } && [[ $sherpa_elapsed -ge $TIMEOUT ]]; then
     if [[ -n "$STATUS_LOG" ]]; then
       {
         flock -x 200
@@ -197,10 +199,14 @@ timeout -s TERM "$TIMEOUT" "$SHERPA_BINARY" -f "$YAML" -R "$SEED" || {
     fi
     exit 0
   else
+    exit_reason="$exit_code"
+    if [[ $exit_code -gt 128 ]]; then
+      exit_reason="$exit_code (SIG$(kill -l $((exit_code - 128)) 2>/dev/null || echo '?'))"
+    fi
     if [[ -n "$STATUS_LOG" ]]; then
       {
         flock -x 200
-        printf "[FAILED] %s.%s | DIR: %s | EVENTS: %s | Exit code: %s\n" "$CLUSTER" "$PROCESS" "$OUTDIR" "$last_event" "$exit_code" >> "$STATUS_LOG"
+        printf "[FAILED] %s.%s | DIR: %s | EVENTS: %s | Exit code: %s\n" "$CLUSTER" "$PROCESS" "$OUTDIR" "$last_event" "$exit_reason" >> "$STATUS_LOG"
       } 200>"$STATUS_LOG.lock"
       rm -f "$STATUS_LOG.lock"
     fi

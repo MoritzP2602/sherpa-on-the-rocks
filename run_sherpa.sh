@@ -1,7 +1,18 @@
 #!/bin/bash
 set -e
 
-SHERPA_INSTALLATION="$(realpath ~/PATH/TO/SHERPA/INSTALLATION/bin/Sherpa)"
+SHERPA_INSTALLATION="$1"
+shift
+
+if [ -z "$SHERPA_INSTALLATION" ]; then
+  echo "ERROR: No SHERPA binary provided as first argument!" >&2
+  exit 1
+fi
+SHERPA_INSTALLATION="$(realpath "$SHERPA_INSTALLATION")"
+if [ ! -x "$SHERPA_INSTALLATION" ]; then
+  echo "ERROR: SHERPA binary not found or not executable: $SHERPA_INSTALLATION" >&2
+  exit 1
+fi
 
 DIRECTORY="$1"
 LOGDIR="$2"
@@ -155,10 +166,12 @@ fi
 
 cd "$TMPDIR"
 
-timeout -s TERM "$TIMEOUT" "$SHERPA_INSTALLATION" -f "$YAML" -R "$SEED" || {
+sherpa_start_epoch=$(date +%s)
+timeout -s TERM -k 60 "$TIMEOUT" "$SHERPA_INSTALLATION" -f "$YAML" -R "$SEED" || {
   exit_code=$?
+  sherpa_elapsed=$(( $(date +%s) - sherpa_start_epoch ))
   last_event=$(get_last_event_count)
-  if [ $exit_code -eq 124 ]; then
+  if { [ $exit_code -eq 124 ] || [ $exit_code -eq 137 ]; } && [ $sherpa_elapsed -ge $TIMEOUT ]; then
     echo ""
     echo "SHERPA was terminated after reaching the time limit of $TIMEOUT seconds!"
     echo "This prevents the job from exceeding the wall time limit."
@@ -170,11 +183,15 @@ timeout -s TERM "$TIMEOUT" "$SHERPA_INSTALLATION" -f "$YAML" -R "$SEED" || {
     rm -f "$STATUS_LOG.lock"
     exit 0
   else
+    exit_reason="$exit_code"
+    if [ $exit_code -gt 128 ]; then
+      exit_reason="$exit_code (SIG$(kill -l $((exit_code - 128)) 2>/dev/null || echo '?'))"
+    fi
     echo ""
-    echo "SHERPA failed with exit code $exit_code"
+    echo "SHERPA failed with exit code $exit_reason after $sherpa_elapsed seconds"
     {
       flock -x 200
-      printf "[FAILED] ${CLUSTER}.${PROCESS} | DIR: %s | EVENTS: %s | Exit code: %s\n" "$OUTDIR" "$last_event" "$exit_code" >> "$STATUS_LOG"
+      printf "[FAILED] ${CLUSTER}.${PROCESS} | DIR: %s | EVENTS: %s | Exit code: %s\n" "$OUTDIR" "$last_event" "$exit_reason" >> "$STATUS_LOG"
     } 200>"$STATUS_LOG.lock"
     rm -f "$STATUS_LOG.lock"
     exit $exit_code
