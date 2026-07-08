@@ -518,6 +518,43 @@ def dag_jobs_to_resume(phase_times: dict, n_dirs: int) -> set[str]:
     return include
 
 
+def diff_states(saved, current, path=""):
+    diffs: list[str] = []
+    if isinstance(saved, dict) and isinstance(current, dict):
+        for key in sorted(set(saved) | set(current), key=str):
+            sub = f"{path}.{key}" if path else str(key)
+            if key not in saved:
+                diffs.append(f"{sub}: only in current config (value {current[key]!r})")
+            elif key not in current:
+                diffs.append(f"{sub}: only in saved run (value {saved[key]!r})")
+            else:
+                diffs.extend(diff_states(saved[key], current[key], sub))
+    elif isinstance(saved, list) and isinstance(current, list):
+        if len(saved) != len(current):
+            diffs.append(f"{path}: saved has {len(saved)} entries, current has {len(current)}")
+        for i, (s, c) in enumerate(zip(saved, current), start=1):
+            diffs.extend(diff_states(s, c, f"{path}[{i}]"))
+    elif saved != current:
+        diffs.append(f"{path}: saved {saved!r}, current {current!r}")
+    return diffs
+
+
+def structural_changes(saved_state: dict, current_state: dict) -> list[str]:
+    reasons: list[str] = []
+    saved_dirs   = [d["path"] for d in saved_state.get("input_dirs", [])]
+    current_dirs = [d["path"] for d in current_state.get("input_dirs", [])]
+    if len(saved_dirs) != len(current_dirs):
+        reasons.append(f"number of input directories changed: {len(saved_dirs)} -> {len(current_dirs)}")
+    else:
+        for i, (s, c) in enumerate(zip(saved_dirs, current_dirs), start=1):
+            if s != c:
+                reasons.append(f"INPUT_DIR{i} path changed: {s} -> {c}")
+    if saved_state.get("merged_dir", "") != current_state.get("merged_dir", ""):
+        reasons.append(f"merged directory changed: '{saved_state.get('merged_dir', '')}' "
+                       f"-> '{current_state.get('merged_dir', '')}'")
+    return reasons
+
+
 def handle_resume(current_state: dict) -> tuple[dict, Path, bool, set[str]]:
     state       = current_state
     resume_mode = False
@@ -527,6 +564,7 @@ def handle_resume(current_state: dict) -> tuple[dict, Path, bool, set[str]]:
     def comparable_state(state: dict) -> dict:
         normalized = json.loads(json.dumps(state))
         normalized.pop("created_at", None)
+        normalized.pop("dag_cluster_id", None)
         normalized.pop("config_path", None)
         normalized.pop("email", None)
         normalized.pop("condor_ids_file", None)
@@ -591,24 +629,44 @@ def handle_resume(current_state: dict) -> tuple[dict, Path, bool, set[str]]:
             except Exception as e:
                 print(f"Found existing run metadata but could not parse it for resume: {e}")
             else:
-                if comparable_state(saved_state) == comparable_state(state):
-                    n_dirs_saved = len(saved_state["input_dirs"])
-                    resume_jobs_candidate = dag_jobs_to_resume(phase_times, n_dirs_saved)
+                diff       = diff_states(comparable_state(saved_state), comparable_state(state))
+                structural = structural_changes(saved_state, state)
+                if diff:
+                    print("Existing run state differs from current config-derived state:")
+                    for line in diff:
+                        print(f"  - {line}")
+                    print()
+                if structural:
+                    print("Resume is not possible for this run because job identity is tied to input directory positions:")
+                    for line in structural:
+                        print(f"  - {line}")
+                    print()
+                else:
+                    n_dirs = len(state["input_dirs"])
+                    resume_jobs_candidate = dag_jobs_to_resume(phase_times, n_dirs)
                     if not resume_jobs_candidate:
                         print("Detected existing completed run (all phases have end_time).")
                     else:
-                        completed_jobs = dag_completed_jobs(phase_times, n_dirs_saved)
+                        completed_jobs = dag_completed_jobs(phase_times, n_dirs)
                         print(f"Detected resumable run in: {master_dir}")
-                        print(f"Completed jobs: {len(completed_jobs)} / {len(dag_jobs(n_dirs_saved))}. "
+                        print(f"Completed jobs: {len(completed_jobs)} / {len(dag_jobs(n_dirs))}. "
                               f"Will submit remaining jobs: {len(resume_jobs_candidate)}")
-                        answer = input("Resume at job level and keep existing outputs? [y/N]: ").strip().lower()
+                        if diff:
+                            print("WARNING: Resuming applies the current configuration to the remaining jobs only;")
+                            print("         already-completed phases keep outputs produced with the previous settings.")
+                            prompt = ("Resume anyway with the current configuration "
+                                      "(keeps completed outputs; resets output dirs, phase times and DAGMan files of remaining jobs)? [y/N]: ")
+                        else:
+                            prompt = ("Resume this run "
+                                      "(keeps completed outputs; resets output dirs, phase times and DAGMan files of remaining jobs)? [y/N]: ")
+                        answer = input(prompt).strip().lower()
                         if answer in {"y", "yes"}:
                             resume_mode = True
-                            state = saved_state
                             resume_jobs = resume_jobs_candidate
-                            master_dir = Path(state["master_dir"])
+                            for key in ("created_at", "dag_cluster_id"):
+                                if key in saved_state:
+                                    state[key] = saved_state[key]
                         else: print("Resume declined.")
-                else: print("Existing run state does not match current config-derived state. Resume is disabled.")
         if not resume_mode:
             answer = input(f"Master directory already exists: {master_dir}\nRemove it and continue? [y/N]: ").strip().lower()
             if answer not in {"y", "yes"}:
@@ -619,14 +677,10 @@ def handle_resume(current_state: dict) -> tuple[dict, Path, bool, set[str]]:
         print(f"Created master directory: {master_dir}\n")
     else:
         print(f"Using existing master directory: {master_dir}\n")
-        print("Resume mode: keeping existing state, condor IDs, phase times, and outputs.")
-        if resume_jobs:
-            answer = input("Reset existing condor output directories for uncompleted jobs and existing DAGMan files? [y/N]: ").strip().lower()
-            if answer not in {"y", "yes"}:
-                raise SystemExit("Aborted.")
-            reset_phase_output(state, resume_jobs)
-            reset_phase_times(state, resume_jobs)
-            cleanup_dagman_files(master_dir, Path(state["dag_path"]))
+        print("Resume mode: keeping condor IDs, phase times, and completed outputs; adopting current configuration.")
+        reset_phase_output(state, resume_jobs)
+        reset_phase_times(state, resume_jobs)
+        cleanup_dagman_files(master_dir, Path(state["dag_path"]))
     return state, master_dir, resume_mode, resume_jobs
 
 
@@ -655,61 +709,55 @@ def cleanup_input_artifacts(state: dict) -> None:
     return
 
 
-def create_dag(state, include_jobs: set[str], resume_mode: bool) -> None:
-    master_dir = Path(state["master_dir"]) 
-    croot      = Path(state["condor_output"]) 
-    job_dir    = Path(state["job_dir"]) 
+def create_dag(state, done_jobs: set[str], resume_mode: bool) -> str:
+    master_dir = Path(state["master_dir"])
+    croot      = Path(state["condor_output"])
+    job_dir    = Path(state["job_dir"])
     state_path = str((master_dir / "state.json").resolve())
     n_dirs     = len(state["input_dirs"])
-
-    def include_job(job_name: str) -> bool:
-        return job_name in include_jobs
 
     lines = []
     lines.append("# Auto-generated by tune.py")
     def v(name, submit, vars_map):
-        lines.append(f"JOB {name} {(job_dir / submit).resolve()}")
+        done_suffix = " DONE" if name in done_jobs else ""
+        lines.append(f"JOB {name} {(job_dir / submit).resolve()}{done_suffix}")
         vars_str = " ".join([f'{k}="{v}"' for k, v in vars_map.items()])
         lines.append(f"VARS {name} {vars_str}")
     for i in range(1, n_dirs + 1):
-        if include_job(f"P1_dir{i}"):
-            v(f"P1_dir{i}",
-              f"P1.jdf",
-                {"JOB_DIR"       : str(job_dir),
-                 "STATE_JSON"    : state_path,
-                 "DIR_INDEX"     : str(i),
-                 "PHASE_LOG_DIR" : str(croot / f"P1_dir{i}"),
-                 "MAXRUNTIME"    : str(state["P1_maxruntime"])})
-        if include_job(f"P2_dir{i}"):
-            v(f"P2_dir{i}",
-              f"P2.jdf",
-                {"JOB_DIR"       : str(job_dir),
-                 "STATE_JSON"    : state_path,
-                 "DIR_INDEX"     : str(i),
-                 "PHASE_LOG_DIR" : str(croot / f"P2_dir{i}"),
-                 "RUNS_FILE"     : str(Path(state["input_dirs"][i - 1]["path"]) / "runs.txt"),
-                 "RUN_DIR"       : state["input_dirs"][i - 1]["path"],
-                 "MAXRUNTIME"    : str(state["P2_maxruntime"]),
-                 "PHASE_KEY"     : "P2"})
-        if include_job(f"P3_dir{i}"):
-            v(f"P3_dir{i}",
-              f"P3.jdf",
-                {"JOB_DIR"       : str(job_dir),
-                 "STATE_JSON"    : state_path,
-                 "DIR_INDEX"     : str(i),
-                 "PHASE_LOG_DIR" : str(croot / f"P3_dir{i}"),
-                 "MAXRUNTIME"    : str(state["P3_maxruntime"]),
-                 "MAX_CPUS"      : str(state.get("max_cpus", 8))})
-        if include_job(f"P4_dir{i}"):
-            v(f"P4_dir{i}",
-              f"P4.jdf",
-                {"JOB_DIR"       : str(job_dir),
-                 "STATE_JSON"    : state_path,
-                 "DIR_INDEX"     : str(i),
-                 "PHASE_LOG_DIR" : str(croot / f"P4_dir{i}"),
-                 "MAXRUNTIME"    : str(state["P4_maxruntime"]),
-                 "MAX_CPUS"      : str(state.get("max_cpus", 8))})
-    if include_job("P5"):
+        v(f"P1_dir{i}",
+          f"P1.jdf",
+            {"JOB_DIR"       : str(job_dir),
+             "STATE_JSON"    : state_path,
+             "DIR_INDEX"     : str(i),
+             "PHASE_LOG_DIR" : str(croot / f"P1_dir{i}"),
+             "MAXRUNTIME"    : str(state["P1_maxruntime"])})
+        v(f"P2_dir{i}",
+          f"P2.jdf",
+            {"JOB_DIR"       : str(job_dir),
+             "STATE_JSON"    : state_path,
+             "DIR_INDEX"     : str(i),
+             "PHASE_LOG_DIR" : str(croot / f"P2_dir{i}"),
+             "RUNS_FILE"     : str(Path(state["input_dirs"][i - 1]["path"]) / "runs.txt"),
+             "RUN_DIR"       : state["input_dirs"][i - 1]["path"],
+             "MAXRUNTIME"    : str(state["P2_maxruntime"]),
+             "PHASE_KEY"     : "P2"})
+        v(f"P3_dir{i}",
+          f"P3.jdf",
+            {"JOB_DIR"       : str(job_dir),
+             "STATE_JSON"    : state_path,
+             "DIR_INDEX"     : str(i),
+             "PHASE_LOG_DIR" : str(croot / f"P3_dir{i}"),
+             "MAXRUNTIME"    : str(state["P3_maxruntime"]),
+             "MAX_CPUS"      : str(state.get("max_cpus", 8))})
+        v(f"P4_dir{i}",
+          f"P4.jdf",
+            {"JOB_DIR"       : str(job_dir),
+             "STATE_JSON"    : state_path,
+             "DIR_INDEX"     : str(i),
+             "PHASE_LOG_DIR" : str(croot / f"P4_dir{i}"),
+             "MAXRUNTIME"    : str(state["P4_maxruntime"]),
+             "MAX_CPUS"      : str(state.get("max_cpus", 8))})
+    if n_dirs >= 2:
             v(f"P5",
               f"P5.jdf",
                 {"JOB_DIR"       : str(job_dir),
@@ -718,60 +766,53 @@ def create_dag(state, include_jobs: set[str], resume_mode: bool) -> None:
                  "MAXRUNTIME"    : str(state["P5_maxruntime"]),
                  "MAX_CPUS"      : str(state.get("max_cpus", 8))})
     for i in range(1, n_dirs + 1):
-        if include_job(f"P6_dir{i}"):
-            v(f"P6_dir{i}",
-              f"P6.jdf",
-                {"JOB_DIR"       : str(job_dir),
-                 "STATE_JSON"    : state_path,
-                 "DIR_INDEX"     : str(i),
-                 "PHASE_LOG_DIR" : str(croot / f"P6_dir{i}"),
-                 "MAXRUNTIME"    : str(state["P6_maxruntime"])})
-        if include_job(f"P7_dir{i}"):
-            v(f"P7_dir{i}",
-              f"P7.jdf",
-                {"JOB_DIR"       : str(job_dir),
-                 "STATE_JSON"    : state_path,
-                 "DIR_INDEX"     : str(i),
-                 "RUN_DIR"       : state["input_dirs"][i - 1]["path"],
-                 "RUNS_FILE"     : str(Path(state["input_dirs"][i - 1]["path"]) / "runs.txt"),
-                 "PHASE_LOG_DIR" : str(croot / f"P7_dir{i}"),
-                 "MAXRUNTIME"    : str(state["P7_maxruntime"]),
-                 "PHASE_KEY"     : "P7"})
-        if include_job(f"P8_dir{i}"):
-            v(f"P8_dir{i}",
-              f"P8.jdf",
-                {"JOB_DIR"       : str(job_dir),
-                 "STATE_JSON"    : state_path,
-                 "DIR_INDEX"     : str(i),
-                 "PHASE_LOG_DIR" : str(croot / f"P8_dir{i}"),
-                 "MAXRUNTIME"    : str(state["P8_maxruntime"]),
-                 "MAX_CPUS"      : str(state.get("max_cpus", 8))})
-    if include_job("P9"):
-            v(f"P9",
-              f"P9.jdf",
-                {"JOB_DIR"       : str(job_dir),
-                 "STATE_JSON"    : state_path,
-                 "PHASE_LOG_DIR" : str(croot / f"P9"),
-                 "MAXRUNTIME"    : str(state["P9_maxruntime"]),
-                 "MAX_CPUS"      : str(state.get("max_cpus", 8))})
+        v(f"P6_dir{i}",
+          f"P6.jdf",
+            {"JOB_DIR"       : str(job_dir),
+             "STATE_JSON"    : state_path,
+             "DIR_INDEX"     : str(i),
+             "PHASE_LOG_DIR" : str(croot / f"P6_dir{i}"),
+             "MAXRUNTIME"    : str(state["P6_maxruntime"])})
+        v(f"P7_dir{i}",
+          f"P7.jdf",
+            {"JOB_DIR"       : str(job_dir),
+             "STATE_JSON"    : state_path,
+             "DIR_INDEX"     : str(i),
+             "RUN_DIR"       : state["input_dirs"][i - 1]["path"],
+             "RUNS_FILE"     : str(Path(state["input_dirs"][i - 1]["path"]) / "runs.txt"),
+             "PHASE_LOG_DIR" : str(croot / f"P7_dir{i}"),
+             "MAXRUNTIME"    : str(state["P7_maxruntime"]),
+             "PHASE_KEY"     : "P7"})
+        v(f"P8_dir{i}",
+          f"P8.jdf",
+            {"JOB_DIR"       : str(job_dir),
+             "STATE_JSON"    : state_path,
+             "DIR_INDEX"     : str(i),
+             "PHASE_LOG_DIR" : str(croot / f"P8_dir{i}"),
+             "MAXRUNTIME"    : str(state["P8_maxruntime"]),
+             "MAX_CPUS"      : str(state.get("max_cpus", 8))})
+    v(f"P9",
+      f"P9.jdf",
+        {"JOB_DIR"       : str(job_dir),
+         "STATE_JSON"    : state_path,
+         "PHASE_LOG_DIR" : str(croot / f"P9"),
+         "MAXRUNTIME"    : str(state["P9_maxruntime"]),
+         "MAX_CPUS"      : str(state.get("max_cpus", 8))})
     post_script = str((job_dir / "post.sh").resolve())
     email = state.get("email", "") or ""
     if email:
-        first_job = next((j for j in dag_jobs(n_dirs) if include_job(j)), None)
+        first_job = next((j for j in dag_jobs(n_dirs) if j not in done_jobs), None)
         if first_job:
             if resume_mode:
                 lines.append(f"SCRIPT PRE {first_job} /bin/bash {post_script} {state_path} resume 0")
             else:
                 lines.append(f"SCRIPT PRE {first_job} /bin/bash {post_script} {state_path} init 0")
     for job in dag_jobs(n_dirs):
-        if not include_job(job):
-            continue
         if job.startswith(("P2_", "P7_")):
             lines.append(f"RETRY {job} 0")
         lines.append(f"SCRIPT POST {job} /bin/bash {post_script} {state_path} {job} $RETURN")
     for parent, child in dag_dependencies(n_dirs):
-        if include_job(parent) and include_job(child):
-            lines.append(f"PARENT {parent} CHILD {child}")
+        lines.append(f"PARENT {parent} CHILD {child}")
     return "\n".join(lines) + "\n"
 
 
@@ -921,12 +962,16 @@ def main():
         Path(state["phase_times_file"]).write_text("{}\n", encoding="utf-8")
         print(f"Created phase times file: {state['phase_times_file']}")
 
-    dag_content = create_dag(state,
-        include_jobs=resume_jobs if resume_mode else set(dag_jobs(len(state["input_dirs"]))), resume_mode=resume_mode)
+    all_jobs = set(dag_jobs(len(state["input_dirs"])))
+    done_jobs = all_jobs - resume_jobs if resume_mode else set()
+    if resume_mode:
+        state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        print(f"Updated state file with current configuration: {state_path}")
+    dag_content = create_dag(state, done_jobs=done_jobs, resume_mode=resume_mode)
     dag_path = Path(state["dag_path"])
     dag_path.write_text(dag_content, encoding="utf-8")
     if resume_mode:
-        print(f"Created DAG file for job-level resume ({len(resume_jobs or set())} jobs): {dag_path}")
+        print(f"Created DAG file ({len(done_jobs)} of {len(all_jobs)} jobs already done): {dag_path}")
     else:
         print(f"Created DAG file: {dag_path}")
     print()
