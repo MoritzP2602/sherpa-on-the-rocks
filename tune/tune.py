@@ -97,6 +97,7 @@ def warn_refdata_overlap(datasets: list) -> None:
         overlaps[key] = overlaps.get(key, 0) + 1
     if not overlaps:
         return
+    print()
     print("WARNING: reference data overlap in combined data.json:")
     for (histname, owners), n_bins in sorted(overlaps.items()):
         dirs = ", ".join(f"INPUT_DIR{i}" for i in owners)
