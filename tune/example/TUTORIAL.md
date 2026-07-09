@@ -26,10 +26,30 @@ For the full list of available steering parameters, see `../PARAMETERS.md`.
 
 ## How to start
 
-From the `example` directory (adjust the paths to the required installations before running):
+Initialize Sherpa and create the required process libraries:
 
 ```bash
 unzip Drell-Yan.zip
+cd Drell-Yan/init
+Sherpa -I Sherpa.yaml && ./makelibs
+cd ../..
+unzip Jets.zip
+cd Jets/init
+Sherpa -I Sherpa.yaml && ./makelibs
+cd ../..
+```
+
+Adjust the tuning ranges in `parameters.json` (and nominal values in `nominal.json` for `config3.yaml`):
+
+```bash
+cd Drell-Yan
+nano parameters.json
+cd ..
+```
+
+From the `example` directory (adjust the paths to the required installations before running), initialize the process and run the master script:
+
+```bash
 python3 ../tune.py config1.yaml
 ```
 
