@@ -37,10 +37,24 @@ get_last_event_count() {
   fi
 }
 
+print_end_time() {
+  local end_time elapsed days hours minutes seconds
+  end_time=$(date '+%Y-%m-%d %H:%M:%S')
+  elapsed=$(( $(date +%s) - start_epoch ))
+
+  # Convert seconds to D-HH:MM:SS
+  days=$(( elapsed / 86400 ))
+  hours=$(( (elapsed % 86400) / 3600 ))
+  minutes=$(( (elapsed % 3600) / 60 ))
+  seconds=$(( elapsed % 60 ))
+
+  echo "Job ended at: $end_time"
+  printf "Total elapsed time: %d-%02d:%02d:%02d\n" "$days" "$hours" "$minutes" "$seconds"
+}
+
 OUTDIR=""
 YODA=""
 cleanup() {
-  echo ""
   if [ -n "$OUTDIR" ] && [ -f "$TMPDIR/Analysis.yoda.gz" ] && [ -d "$OUTDIR" ]; then
     if cp -f "$TMPDIR/Analysis.yoda.gz" "$OUTDIR/$YODA" 2>/dev/null; then
       echo "Successfully copied Analysis.yoda.gz to $OUTDIR/$YODA"
@@ -63,7 +77,7 @@ trap cleanup EXIT SIGTERM SIGINT SIGQUIT
 # Record the start time
 start_epoch=$(date +%s)
 start_time=$(date '+%Y-%m-%d %H:%M:%S')
-echo "Job ${CLUSTER}.${PROCESS} started on $(hostname)"
+echo "Job ${CLUSTER}.${PROCESS} started on $(hostname) at: $start_time"
 echo ""
 
 ### --------------------------------------------------- ###
@@ -166,15 +180,20 @@ fi
 
 cd "$TMPDIR"
 
+echo "Starting SHERPA..."
+echo ""
 sherpa_start_epoch=$(date +%s)
 timeout -s TERM -k 60 "$TIMEOUT" "$SHERPA_INSTALLATION" -f "$YAML" -R "$SEED" || {
   exit_code=$?
   sherpa_elapsed=$(( $(date +%s) - sherpa_start_epoch ))
   last_event=$(get_last_event_count)
+  echo ""
   if { [ $exit_code -eq 124 ] || [ $exit_code -eq 137 ]; } && [ $sherpa_elapsed -ge $TIMEOUT ]; then
-    echo ""
     echo "SHERPA was terminated after reaching the time limit of $TIMEOUT seconds!"
     echo "This prevents the job from exceeding the wall time limit."
+    echo ""
+    print_end_time
+    echo ""
     echo "Copying output files back to shared filesystem..."
     {
       flock -x 200
@@ -187,8 +206,11 @@ timeout -s TERM -k 60 "$TIMEOUT" "$SHERPA_INSTALLATION" -f "$YAML" -R "$SEED" ||
     if [ $exit_code -gt 128 ]; then
       exit_reason="$exit_code (SIG$(kill -l $((exit_code - 128)) 2>/dev/null || echo '?'))"
     fi
-    echo ""
     echo "SHERPA failed with exit code $exit_reason after $sherpa_elapsed seconds"
+    echo ""
+    print_end_time
+    echo ""
+    echo "Copying output files back to shared filesystem..."
     {
       flock -x 200
       printf "[FAILED] ${CLUSTER}.${PROCESS} | DIR: %s | EVENTS: %s | Exit code: %s\n" "$OUTDIR" "$last_event" "$exit_reason" >> "$STATUS_LOG"
@@ -197,25 +219,12 @@ timeout -s TERM -k 60 "$TIMEOUT" "$SHERPA_INSTALLATION" -f "$YAML" -R "$SEED" ||
     exit $exit_code
   fi
 }
-
-### --------------------------------------------------- ###
-
-# Record end time
-end_epoch=$(date +%s)
-end_time=$(date '+%Y-%m-%d %H:%M:%S')
 echo ""
-echo "Job ended at:   $end_time"
-
-# Calculate elapsed time
-elapsed=$(( end_epoch - start_epoch ))
-
-# Convert seconds to D-HH:MM:SS
-days=$(( elapsed / 86400 ))
-hours=$(( (elapsed % 86400) / 3600 ))
-minutes=$(( (elapsed % 3600) / 60 ))
-seconds=$(( elapsed % 60 ))
-
-printf "Total elapsed time: %d-%02d:%02d:%02d\n" "$days" "$hours" "$minutes" "$seconds"
+echo "SHERPA completed successfully."
+echo ""
+print_end_time
+echo ""
+echo "Copying output files back to shared filesystem..."
 {
   flock -x 200
   printf "[COMPLETE] ${CLUSTER}.${PROCESS} | DIR: %s \n" "$OUTDIR" >> "$STATUS_LOG"
