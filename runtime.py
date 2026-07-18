@@ -49,36 +49,27 @@ def main(paths):
         # Extract number of events
         event_lines = re.findall(r'Event\s+(\d+)\s+\(\s*(\d+)\s*s\s+total\s*\)', content)
         events_match = re.search(r'Generated events:\s*(\d+)', content)
-        if not events_match:
-            if not event_lines:
-                continue
+        if events_match:
+            events = int(events_match.group(1))
+        elif event_lines:
             events = int(event_lines[-1][0])
-            time_no_init = int(event_lines[-1][1])
-            if events == 0:
-                continue
-
-            yaml_stats[yaml_path]['events'] += events
-            yaml_stats[yaml_path]['time_no_init'] += time_no_init
-            yaml_stats[yaml_path]['events_no_init'] += events
-            yaml_stats[yaml_path]['runs'] += 1
-
-            time_no_init_per_1M = (time_no_init / events) * 1e6 / 3600.0
-            yaml_stats[yaml_path]['run_times_no_init_per_1M'].append(time_no_init_per_1M)
+        else:
             continue
-        events = int(events_match.group(1))
-        
-        # Extract elapsed time (with initialization)
+        if events == 0:
+            continue
+
+        # Extract elapsed time (with initialization); missing in .out files of
+        # crashed runs written before it was logged for all outcomes
         time_match = re.search(r'Total elapsed time:\s*([0-9\-:]+)', content)
-        elapsed = None
-        if time_match and events > 0:
+        if time_match:
             elapsed = parse_time(time_match.group(1))
             yaml_stats[yaml_path]['time'] += elapsed
             yaml_stats[yaml_path]['events_with_init'] += events
             time_per_1M = (elapsed / events) * 1e6 / 3600.0
             yaml_stats[yaml_path]['run_times_per_1M'].append(time_per_1M)
-        
+
         # Extract time without initialization (from last Event line)
-        if event_lines and events > 0:
+        if event_lines:
             time_no_init = int(event_lines[-1][1])
             yaml_stats[yaml_path]['time_no_init'] += time_no_init
             yaml_stats[yaml_path]['events_no_init'] += events
@@ -90,9 +81,15 @@ def main(paths):
     warning_msg = ""
     print('\r' + ' ' * 50 + '\r', end='', flush=True)
     
+    def short_group(yaml_path):
+        yaml_dir = os.path.dirname(yaml_path)
+        if base_path and base_path in yaml_dir:
+            return yaml_dir.split(base_path, 1)[1].strip('/')
+        return yaml_dir
+
     print(f"{'GROUP':40} {'With init [h]/1M':>18} {'Min':>10} {'Max':>10} {'No init [h]/1M':>16} {'Total events':>15} {'Runs':>5}")
     print('-'*122)
-    for yaml, stats in yaml_stats.items():
+    for yaml, stats in sorted(yaml_stats.items(), key=lambda item: short_group(item[0])):
         if stats['events'] == 0:
             continue
         
@@ -116,14 +113,11 @@ def main(paths):
         
         yaml_dir = os.path.dirname(yaml)
 
-        if base_path and base_path in yaml_dir:
-            if len(yaml_dir.split(base_path)) > 2:
-                if len(warning_msg) == 0:
-                    warning_msg += "Warning: YAML path contains base path multiple times, uses first occurrence for output path splitting.\n"
-                warning_msg += "YAML path: " + yaml_dir + ", base path: " + base_path + "\n"
-            short_dir = yaml_dir.split(base_path, 1)[1].strip('/')
-        else:
-            short_dir = yaml_dir
+        if base_path and base_path in yaml_dir and len(yaml_dir.split(base_path)) > 2:
+            if len(warning_msg) == 0:
+                warning_msg += "Warning: YAML path contains base path multiple times, uses first occurrence for output path splitting.\n"
+            warning_msg += "YAML path: " + yaml_dir + ", base path: " + base_path + "\n"
+        short_dir = short_group(yaml)
         
         print(f"{short_dir:40} {time_str} {min_str} {max_str} {time_no_init_str} {stats['events']:15d} {stats['runs']:5d}")
     print('-'*122)
