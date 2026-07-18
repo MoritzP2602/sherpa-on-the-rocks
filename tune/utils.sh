@@ -246,18 +246,26 @@ emit('CONDOR_OUTPUT', s['condor_output'])
 emit('N_INPUT_DIRS', len(s['input_dirs']))
 emit('N_GRID', s['n_grid'])
 emit('GRID_SAMPLING', s['grid_sampling'])
+def orders(block):
+    if block.get('orders'):
+        return list(block['orders'])
+    if block.get('order'):
+        return [block['order']]
+    return []
+
 app = s['apprentice']
 if app:
-  emit('APP_ORDER', app['order'])
-  emit('APP_ORDER_SAFE', app['order_safe'])
+  app_orders = orders(app)
+  emit('APP_ORDERS', ' '.join(app_orders))
+  emit('APP_ORDERS_SAFE', ' '.join(o.replace(',', '_') for o in app_orders))
   emit('APP_BUILD_OPTIONS', app.get('build_options', ''))
   emit('APP_TUNE2_OPTIONS', app.get('tune2_options', ''))
 prof = s['professor']
 if prof:
-  emit('PROF_ORDER', prof['order'])
-  emit('PROF_ORDER_SAFE', prof['order_safe'])
+  emit('PROF_ORDERS', ' '.join(orders(prof)))
   emit('PROF2_IPOL_OPTIONS', prof.get('ipol_options', ''))
   emit('PROF2_TUNE_OPTIONS', prof.get('tune_options', ''))
+emit('SPLIT_TUNING', int(bool(s.get('split_tuning_procedure', False))))
 emit('PATTERN', s['pattern'])
 emit('COMBINE_MODE', s['combine_mode'])
 emit('MERGED_DIR', s['merged_dir'])

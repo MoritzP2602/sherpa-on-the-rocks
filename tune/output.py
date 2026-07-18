@@ -13,13 +13,14 @@ def load_json(path: Path) -> dict:
     except Exception: return {}
 
 
-def parse_key(key: str) -> tuple[int, int, str]:
-    m = re.fullmatch(r"P(\d+)(?:_dir(\d+))?", key)
+def parse_key(key: str) -> tuple[int, int, str, str]:
+    m = re.fullmatch(r"P(\d+)(?:_dir(\d+))?(?:_(.+))?", key)
     if not m:
-        return (999, 999, key)
+        return (999, 999, "", key)
     phase = int(m.group(1))
     directory = int(m.group(2)) if m.group(2) else 0
-    return (phase, directory, key)
+    suffix = m.group(3) or ""
+    return (phase, directory, suffix, key)
 
 
 def append_files(lines: list[str], title: str, paths: list[Path]) -> None:

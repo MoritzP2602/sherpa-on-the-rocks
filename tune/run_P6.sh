@@ -50,20 +50,20 @@ REQUIRED_INPUTS=("$INPUT_DIR"
                  "$INPUT_DIR/template.yaml"
                  "$SHERPA_ON_THE_ROCKS_DIR/prepare_runs.sh")
 if [[ "${VALIDATION_ONLY_MERGED:-0}" != "1" ]]; then
-  if [[ -n "${APP_ORDER:-}" ]]; then
-    require_backend_tunes "$INPUT_DIR" Apprentice tune.apprentice "$APP_ORDER_SAFE" "dir${DIR_INDEX}"
-  fi
-  if [[ -n "${PROF_ORDER:-}" ]]; then
-    require_backend_tunes "$INPUT_DIR" Professor tune.professor "$PROF_ORDER_SAFE" "dir${DIR_INDEX}"
-  fi
+  for safe in ${APP_ORDERS_SAFE:-}; do
+    require_backend_tunes "$INPUT_DIR" Apprentice tune.apprentice "$safe" "dir${DIR_INDEX}"
+  done
+  for safe in ${PROF_ORDERS:-}; do
+    require_backend_tunes "$INPUT_DIR" Professor tune.professor "$safe" "dir${DIR_INDEX}"
+  done
 fi
 if [[ "$N_INPUT_DIRS" -ge 2 ]]; then
-  if [[ -n "${APP_ORDER:-}" ]]; then
-    require_backend_tunes "$MERGED_DIR" Apprentice tune.apprentice "$APP_ORDER_SAFE" merged
-  fi
-  if [[ -n "${PROF_ORDER:-}" ]]; then
-    require_backend_tunes "$MERGED_DIR" Professor tune.professor "$PROF_ORDER_SAFE" merged
-  fi
+  for safe in ${APP_ORDERS_SAFE:-}; do
+    require_backend_tunes "$MERGED_DIR" Apprentice tune.apprentice "$safe" merged
+  done
+  for safe in ${PROF_ORDERS:-}; do
+    require_backend_tunes "$MERGED_DIR" Professor tune.professor "$safe" merged
+  done
 fi
 require_inputs "6" "$TAG" "${REQUIRED_INPUTS[@]}"
 
@@ -71,13 +71,13 @@ cd "$INPUT_DIR"
 rm -rf validation
 
 if [[ "${VALIDATION_ONLY_MERGED:-0}" != "1" ]]; then
-  if [[ -n "${APP_ORDER:-}" ]]; then add_validation_grid "$INPUT_DIR" Apprentice tune.apprentice; fi
-  if [[ -n "${PROF_ORDER:-}" ]]; then add_validation_grid "$INPUT_DIR" Professor tune.professor; fi
+  if [[ -n "${APP_ORDERS:-}" ]];  then add_validation_grid "$INPUT_DIR" Apprentice tune.apprentice; fi
+  if [[ -n "${PROF_ORDERS:-}" ]]; then add_validation_grid "$INPUT_DIR" Professor tune.professor; fi
 fi
 
 if [[ "$N_INPUT_DIRS" -ge 2 ]]; then
-  if [[ -n "${APP_ORDER:-}" ]]; then add_validation_grid "$MERGED_DIR" Apprentice tune.apprentice; fi
-  if [[ -n "${PROF_ORDER:-}" ]]; then add_validation_grid "$MERGED_DIR" Professor tune.professor; fi
+  if [[ -n "${APP_ORDERS:-}" ]];  then add_validation_grid "$MERGED_DIR" Apprentice tune.apprentice; fi
+  if [[ -n "${PROF_ORDERS:-}" ]]; then add_validation_grid "$MERGED_DIR" Professor tune.professor; fi
 fi
 
 run_cmd "6" "$TAG" bash "$SHERPA_ON_THE_ROCKS_DIR/prepare_runs.sh" validation "$N_VAL_SUBRUNS" --quiet

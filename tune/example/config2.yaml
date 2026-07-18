@@ -16,11 +16,14 @@ VALIDATION_ONLY_ERR: on
 VALIDATION_ONLY_MERGED: on
 
 APPRENTICE:
-  ORDER: 2,0
+  ORDER: 2,0                     # or a list of orders: ORDER: ["2,0", "3,0"]
   APP_TUNE2_OPTIONS: -s 500 -r 20
 
 PROFESSOR:
-  ORDER: 2
+  ORDER: 2                       # or a list of orders: ORDER: [2, 3]
+
+# Run every (input dir x backend x order) build/tune as its own parallel job:
+# SPLIT_TUNING_PROCEDURE: on
 
 RIVET_ENV_SCRIPT:        ~/Programs/local/rivetenv.sh
 SHERPA_ON_THE_ROCKS_DIR: ~/sherpa-on-the-rocks

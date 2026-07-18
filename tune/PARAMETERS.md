@@ -36,12 +36,12 @@
 - **Combined execution**: If both are configured, phases P4 and P5 run Apprentice first, then Professor. Each backend writes to its own `Apprentice/` and `Professor/` output folder.
 
 #### APPRENTICE
-- `ORDER` (**required**): String `k_p,k_q` (e.g. `2,1`). Two comma-separated integers giving the orders of the numerator/denominator surrogate polynomials used by `app-build`.
+- `ORDER` (**required**): String `k_p,k_q` (e.g. `2,1`), or a **list** of such strings (e.g. `ORDER: ["2,0", "3,0"]`). Two comma-separated integers giving the orders of the numerator/denominator surrogate polynomials used by `app-build`. In a list, every entry **must be quoted** — unquoted `[2,0]` is parsed by YAML as two integers, not one order. With a list, the build/tune step (P4) and the merged tune (P5) run once per order; every order gets its own surrogate, tune directories, and merged weight files (`weights.<order>.txt` / `err.weights.<order>.txt` in `MERGED_DIR/Apprentice`).
 - `APP_BUILD_OPTIONS` (optional): Free-form CLI option string appended to every `app-build` call (only if non-empty). Use this for any optional Apprentice build flags.
 - `APP_TUNE2_OPTIONS` (optional): Free-form CLI option string appended to every `app-tune2` call (only if non-empty). For example `-s 500 -r 20` sets the survey size and number of restarts.
 
 #### PROFESSOR
-- `ORDER` (**required**): A single integer (e.g. `2`). Giving the order of the surrogate polynomial used by `prof2-ipol`.
+- `ORDER` (**required**): A single integer (e.g. `2`), or a **list** of integers (e.g. `ORDER: [2, 3, 4]`). Giving the order(s) of the surrogate polynomial used by `prof2-ipol`. With a list, the build/tune step (P4) and the merged tune (P5) run once per order; every order gets its own interpolation, tune directories, and merged weight files (`weights.<order>.txt` / `err.weights.<order>.txt` in `MERGED_DIR/Professor`).
 - `PROF2_IPOL_OPTIONS` (optional): Free-form CLI option string appended to every `prof2-ipol` call (only if non-empty).
 - `PROF2_TUNE_OPTIONS` (optional): Free-form CLI option string appended to every `prof2-tune` call (only if non-empty).
 
@@ -127,7 +127,13 @@
 - **Type**: String
 - **Default**: `weighted`
 - **Valid Values**: `weighted`, `equal` (only for multi-input runs)
-- **Description**: Method for combining tuning results from all processes. Applied per backend in P5. If `weighted` is used, the weights are automatically rescaled to balance the contribution to the global chi2 of each process, `equal` rescales all weights by 1.0.
+- **Description**: Method for combining tuning results from all processes. Applied per backend and per surrogate order in P5 (each order gets its own combined weight files, since the per-process best-tune results differ per order). If `weighted` is used, the weights are automatically rescaled to balance the contribution to the global chi2 of each process, `equal` rescales all weights by 1.0.
+
+### SPLIT_TUNING_PROCEDURE
+- **Type**: Boolean-like string
+- **Default**: `off`
+- **Valid Values**: `on`, `off`, `true`, `false`
+- **Description**: If `on`, the build/tune work is split into parallel HTCondor DAG nodes: every combination of input directory, backend, and surrogate order becomes its own P4 subjob (e.g. `P4_dir1_app_2_0`, `P4_dir1_prof_3`), and every combination of backend and surrogate order becomes its own P5 merged-tune subjob (e.g. `P5_app_2_0`). Input directories with `REWEIGHTING: on` additionally get a `P4_dirX_prep` node that runs `app-tools-split_reweighting` once before the parallel subjobs start. The validation phase (P6) starts only after all tune subjobs have finished. This speeds up runs with several surrogate orders and/or both backends at the cost of more scheduler jobs. Note: changing `SPLIT_TUNING_PROCEDURE` or any `ORDER` list between runs changes the DAG job identities, so such runs cannot be resumed (tune.py will offer a fresh start instead).
 
 ### VALIDATION_ONLY_ERR
 - **Type**: Boolean-like string

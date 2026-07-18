@@ -119,17 +119,18 @@ def write_stacked_json_values(input_dirs: list[Path], merged_dir: Path) -> None:
 
 def get_phase_overview(state):
     n_dirs = len(state["input_dirs"])
+    split_suffix = " (one subjob per backend and order)" if state.get("split_tuning_procedure") else ""
     phases = []
     phases.extend([
                 ("P1", "Create tuning grid and prepare Sherpa subruns"),
                 ("P2", "Sherpa event generation for tuning grid"),
                 ("P3", "Merge results of Sherpa subruns using yodamerge/rivet-merge"),
-                ("P4", "Build surrogate model and optimize parameters"),
+                ("P4", "Build surrogate model and optimize parameters" + split_suffix),
                   ])
-    if n_dirs == 1: 
+    if n_dirs == 1:
         phases.append(("P5", "SKIPPED"))
-    else: 
-        phases.append(("P5", "Combine results from different processes and repeat tuning"))
+    else:
+        phases.append(("P5", "Combine results from different processes and repeat tuning" + split_suffix))
     phases.extend([
                 ("P6", "Create validation grid from tune results and prepare subruns"),
                 ("P7", "Sherpa event generation for validation grid"),
@@ -190,7 +191,8 @@ def parse_on_off(value, key: str) -> bool:
 def parse_apprentice_order(value: str) -> tuple[int, int]:
     parts = [x.strip() for x in str(value).split(",")]
     if len(parts) != 2:
-        raise ValueError("APPRENTICE.ORDER must have exactly two comma-separated integers, e.g. '2,1'")
+        raise ValueError("APPRENTICE.ORDER must have exactly two comma-separated integers, e.g. '2,1' "
+                         "(in a list, quote each entry, e.g. ORDER: [\"2,0\", \"3,0\"])")
     try:
         k_p = int(parts[0])
         k_q = int(parts[1])
@@ -211,6 +213,20 @@ def parse_professor_order(value: str) -> int:
     if k < 0:
         raise ValueError("PROFESSOR.ORDER must be >= 0")
     return k
+
+def parse_order_list(value, key: str, parse_single, canonicalize) -> list[str]:
+    items = value if isinstance(value, list) else [value]
+    if not items:
+        raise KeyError(f"Missing required key: {key}")
+    orders = []
+    for item in items:
+        raw = str(item).strip()
+        if not raw:
+            raise ValueError(f"{key} entries must be non-empty")
+        orders.append(canonicalize(parse_single(raw)))
+    if len(set(orders)) != len(orders):
+        raise ValueError(f"{key} contains duplicate orders: {orders}")
+    return orders
 
 def parse_backend_options(block: dict, key: str) -> str:
     value = block.get(key)
@@ -304,6 +320,8 @@ def build_state(cfg, config_path: Path):
     if validation_only_merged and n_dirs < 2:
         raise ValueError("VALIDATION_ONLY_MERGED requires at least two input directories (no merged tune exists for a single input)")
 
+    split_tuning = parse_on_off(cfg.get("SPLIT_TUNING_PROCEDURE", "off"), "SPLIT_TUNING_PROCEDURE")
+
     max_cpus = int(cfg.get("MAX_CPUS", 8))
     if max_cpus <= 0:
         raise ValueError("MAX_CPUS must be > 0")
@@ -349,27 +367,31 @@ def build_state(cfg, config_path: Path):
     min_grid_size = 0
     apprentice, professor = {}, {}
     if apprentice_cfg is not None:
-        order = str(apprentice_cfg.get("ORDER", "")).strip()
-        if not order:
+        if "ORDER" not in apprentice_cfg:
             raise KeyError("Missing required key: APPRENTICE.ORDER")
-        k_p, k_q = parse_apprentice_order(order)
+        orders = parse_order_list(apprentice_cfg["ORDER"], "APPRENTICE.ORDER",
+                                  parse_apprentice_order, lambda kq: f"{kq[0]},{kq[1]}")
         apprentice = {
-            "order"        : order,
-            "order_safe"   : order.replace(",", "_"),
+            "orders"       : orders,
+            "orders_safe"  : [o.replace(",", "_") for o in orders],
             "build_options": parse_backend_options(apprentice_cfg, "APP_BUILD_OPTIONS"),
             "tune2_options": parse_backend_options(apprentice_cfg, "APP_TUNE2_OPTIONS")}
-        min_grid_size = max(min_grid_size, math.comb(n_params + k_p, k_p) + math.comb(n_params + k_q, k_q))
+        for order in orders:
+            k_p, k_q = parse_apprentice_order(order)
+            min_grid_size = max(min_grid_size, math.comb(n_params + k_p, k_p) + math.comb(n_params + k_q, k_q))
     if professor_cfg is not None:
-        order = str(professor_cfg.get("ORDER", "")).strip()
-        if not order:
+        if "ORDER" not in professor_cfg:
             raise KeyError("Missing required key: PROFESSOR.ORDER")
-        k = parse_professor_order(order)
+        orders = parse_order_list(professor_cfg["ORDER"], "PROFESSOR.ORDER",
+                                  parse_professor_order, str)
         professor = {
-            "order"       : str(k),
-            "order_safe"  : str(k),
+            "orders"      : orders,
+            "orders_safe" : list(orders),
             "ipol_options": parse_backend_options(professor_cfg, "PROF2_IPOL_OPTIONS"),
             "tune_options": parse_backend_options(professor_cfg, "PROF2_TUNE_OPTIONS")}
-        min_grid_size = max(min_grid_size, math.comb(n_params + k, k))
+        for order in orders:
+            k = parse_professor_order(order)
+            min_grid_size = max(min_grid_size, math.comb(n_params + k, k))
 
     grid_warning = ""
     if n_grid < min_grid_size:
@@ -442,6 +464,7 @@ def build_state(cfg, config_path: Path):
         "grid_sampling"           : grid_sampling,
         "apprentice"              : apprentice,
         "professor"               : professor,
+        "split_tuning_procedure"  : split_tuning,
         "pattern"                 : pattern,
         "combine_mode"            : combine_mode,
         "merged_dir"              : merged_dir,
@@ -462,25 +485,70 @@ def build_state(cfg, config_path: Path):
     return state, grid_warning
 
 
-def dag_jobs(n_dirs: int) -> list[str]:
+def p4_prep_node(i: int) -> str:
+    return f"P4_dir{i}_prep"
+
+def p4_node(i: int, backend: str, order_safe: str) -> str:
+    return f"P4_dir{i}_{backend}_{order_safe}"
+
+def p5_node(backend: str, order_safe: str) -> str:
+    return f"P5_{backend}_{order_safe}"
+
+def backend_orders(state) -> list[tuple[str, str, str]]:
+    """All configured (backend_token, order, order_safe) combinations."""
+    out: list[tuple[str, str, str]] = []
+    for token, key in (("app", "apprentice"), ("prof", "professor")):
+        block = state.get(key) or {}
+        for order, safe in zip(block.get("orders", []), block.get("orders_safe", [])):
+            out.append((token, order, safe))
+    return out
+
+def p4_specs_for_dir(state, i: int) -> list[tuple[str, str, str]]:
+    """P4 DAG nodes for one input dir as (node_name, tune_mode, tune_order)."""
+    if not state.get("split_tuning_procedure"):
+        return [(f"P4_dir{i}", "", "")]
+    specs: list[tuple[str, str, str]] = []
+    if state["input_dirs"][i - 1]["reweight"]:
+        specs.append((p4_prep_node(i), "prep", ""))
+    specs.extend((p4_node(i, b, s), b, o) for b, o, s in backend_orders(state))
+    return specs
+
+def p5_specs(state) -> list[tuple[str, str, str]]:
+    """P5 DAG nodes as (node_name, tune_mode, tune_order)."""
+    if len(state["input_dirs"]) < 2:
+        return []
+    if not state.get("split_tuning_procedure"):
+        return [("P5", "", "")]
+    return [(p5_node(b, s), b, o) for b, o, s in backend_orders(state)]
+
+def p4_nodes_for_dir(state, i: int) -> list[str]:
+    return [name for name, _, _ in p4_specs_for_dir(state, i)]
+
+def p5_nodes(state) -> list[str]:
+    return [name for name, _, _ in p5_specs(state)]
+
+def dag_jobs(state) -> list[str]:
+    n_dirs = len(state["input_dirs"])
     jobs: list[str] = []
     for i in range(1, n_dirs + 1):
-        jobs.extend([f"P1_dir{i}", f"P2_dir{i}", f"P3_dir{i}", f"P4_dir{i}"])
-    if n_dirs >= 2:
-        jobs.append("P5")
+        jobs.extend([f"P1_dir{i}", f"P2_dir{i}", f"P3_dir{i}"])
+        jobs.extend(p4_nodes_for_dir(state, i))
+    jobs.extend(p5_nodes(state))
     for i in range(1, n_dirs + 1):
         jobs.extend([f"P6_dir{i}", f"P7_dir{i}", f"P8_dir{i}"])
     jobs.append("P9")
     return jobs
 
-def dag_completed_jobs(phase_times: dict, n_dirs: int) -> set[str]:
+def dag_completed_jobs(phase_times: dict, state) -> set[str]:
     completed: set[str] = set()
-    for job in dag_jobs(n_dirs):
+    for job in dag_jobs(state):
         if (phase_times.get(job) or {}).get("end_time"):
             completed.add(job)
     return completed
 
-def dag_dependencies(n_dirs: int) -> list[tuple[str, str]]:
+def dag_dependencies(state) -> list[tuple[str, str]]:
+    n_dirs = len(state["input_dirs"])
+    split  = bool(state.get("split_tuning_procedure"))
     edges: list[tuple[str, str]] = []
     for i in range(2, n_dirs + 1):
         edges.append(("P1_dir1", f"P1_dir{i}"))
@@ -488,15 +556,34 @@ def dag_dependencies(n_dirs: int) -> list[tuple[str, str]]:
         edges.extend([
                 (f"P1_dir{i}", f"P2_dir{i}"),
                 (f"P2_dir{i}", f"P3_dir{i}"),
-                (f"P3_dir{i}", f"P4_dir{i}"),
                      ])
+        if split:
+            tune_nodes = [p4_node(i, b, s) for b, _, s in backend_orders(state)]
+            if state["input_dirs"][i - 1]["reweight"]:
+                edges.append((f"P3_dir{i}", p4_prep_node(i)))
+                edges.extend((p4_prep_node(i), node) for node in tune_nodes)
+            else:
+                edges.extend((f"P3_dir{i}", node) for node in tune_nodes)
+        else:
+            edges.append((f"P3_dir{i}", f"P4_dir{i}"))
     if n_dirs >= 2:
-        for i in range(1, n_dirs + 1):
-            edges.append((f"P4_dir{i}", "P5"))
-        for i in range(1, n_dirs + 1):
-            edges.append(("P5", f"P6_dir{i}"))
+        if split:
+            for b, _, s in backend_orders(state):
+                merged = p5_node(b, s)
+                for i in range(1, n_dirs + 1):
+                    edges.append((p4_node(i, b, s), merged))
+                for i in range(1, n_dirs + 1):
+                    edges.append((merged, f"P6_dir{i}"))
+        else:
+            for i in range(1, n_dirs + 1):
+                edges.append((f"P4_dir{i}", "P5"))
+            for i in range(1, n_dirs + 1):
+                edges.append(("P5", f"P6_dir{i}"))
     else:
-        edges.append(("P4_dir1", "P6_dir1"))
+        if split:
+            edges.extend((p4_node(1, b, s), "P6_dir1") for b, _, s in backend_orders(state))
+        else:
+            edges.append(("P4_dir1", "P6_dir1"))
     for i in range(1, n_dirs + 1):
         edges.extend([
                 (f"P6_dir{i}", f"P7_dir{i}"),
@@ -505,11 +592,11 @@ def dag_dependencies(n_dirs: int) -> list[tuple[str, str]]:
                      ])
     return edges
 
-def dag_jobs_to_resume(phase_times: dict, n_dirs: int) -> set[str]:
-    completed_jobs = dag_completed_jobs(phase_times, n_dirs)
-    include: set[str] = {job for job in dag_jobs(n_dirs) if job not in completed_jobs}
+def dag_jobs_to_resume(phase_times: dict, state) -> set[str]:
+    completed_jobs = dag_completed_jobs(phase_times, state)
+    include: set[str] = {job for job in dag_jobs(state) if job not in completed_jobs}
     changed = True
-    edges = dag_dependencies(n_dirs)
+    edges = dag_dependencies(state)
     while changed:
         changed = False
         for parent, child in edges:
@@ -540,6 +627,16 @@ def diff_states(saved, current, path=""):
     return diffs
 
 
+def normalized_orders(block) -> list[str]:
+    if not isinstance(block, dict):
+        return []
+    if "orders" in block:
+        return list(block["orders"])
+    if block.get("order"):
+        return [block["order"]]
+    return []
+
+
 def structural_changes(saved_state: dict, current_state: dict) -> list[str]:
     reasons: list[str] = []
     saved_dirs   = [d["path"] for d in saved_state.get("input_dirs", [])]
@@ -553,6 +650,18 @@ def structural_changes(saved_state: dict, current_state: dict) -> list[str]:
     if saved_state.get("merged_dir", "") != current_state.get("merged_dir", ""):
         reasons.append(f"merged directory changed: '{saved_state.get('merged_dir', '')}' "
                        f"-> '{current_state.get('merged_dir', '')}'")
+    for key, label in (("apprentice", "APPRENTICE"), ("professor", "PROFESSOR")):
+        saved_orders   = normalized_orders(saved_state.get(key))
+        current_orders = normalized_orders(current_state.get(key))
+        if saved_orders != current_orders:
+            reasons.append(f"{label}.ORDER changed: {saved_orders} -> {current_orders} "
+                           f"(the order set is part of job identity)")
+    saved_split   = bool(saved_state.get("split_tuning_procedure", False))
+    current_split = bool(current_state.get("split_tuning_procedure", False))
+    if saved_split != current_split:
+        reasons.append(f"SPLIT_TUNING_PROCEDURE changed: "
+                       f"{'on' if saved_split else 'off'} -> {'on' if current_split else 'off'} "
+                       f"(renames all P4/P5 DAG nodes)")
     return reasons
 
 
@@ -574,17 +683,15 @@ def handle_resume(current_state: dict) -> tuple[dict, Path, bool, set[str]]:
         for backend in ("apprentice", "professor"):
             block = normalized.get(backend)
             if isinstance(block, dict):
-                normalized[backend] = {"order": block["order"]} if "order" in block else {}
+                orders = normalized_orders(block)
+                normalized[backend] = {"orders": orders} if orders else {}
+        normalized.setdefault("split_tuning_procedure", False)
         return normalized
     
     def reset_phase_output(state: dict, jobs: set[str]) -> None:
         croot = Path(state["condor_output"])
         for job in sorted(jobs):
-            if "_dir" in job:
-                phase, dir_idx = job.split("_dir", 1)
-                target = croot / f"{phase}_dir{dir_idx}"
-            else:
-                target = croot / job
+            target = croot / job
             if target.exists():
                 failed = False
                 def _on_rmtree_error(func, path, exc_info):
@@ -638,19 +745,19 @@ def handle_resume(current_state: dict) -> tuple[dict, Path, bool, set[str]]:
                         print(f"  - {line}")
                     print()
                 if structural:
-                    print("Resume is not possible for this run because job identity is tied to input directory positions:")
+                    print("Resume is not possible for this run because job identity is tied to the input directories, "
+                          "the surrogate order sets, and the split setting:")
                     for line in structural:
                         print(f"  - {line}")
                     print()
                 else:
-                    n_dirs = len(state["input_dirs"])
-                    resume_jobs_candidate = dag_jobs_to_resume(phase_times, n_dirs)
+                    resume_jobs_candidate = dag_jobs_to_resume(phase_times, state)
                     if not resume_jobs_candidate:
                         print("Detected existing completed run (all phases have end_time).")
                     else:
-                        completed_jobs = dag_completed_jobs(phase_times, n_dirs)
+                        completed_jobs = dag_completed_jobs(phase_times, state)
                         print(f"Detected resumable run in: {master_dir}")
-                        print(f"Completed jobs: {len(completed_jobs)} / {len(dag_jobs(n_dirs))}. "
+                        print(f"Completed jobs: {len(completed_jobs)} / {len(dag_jobs(state))}. "
                               f"Will submit remaining jobs: {len(resume_jobs_candidate)}")
                         if diff:
                             print("WARNING: Resuming applies the current configuration to the remaining jobs only;")
@@ -750,22 +857,27 @@ def create_dag(state, done_jobs: set[str], resume_mode: bool) -> str:
              "PHASE_LOG_DIR" : str(croot / f"P3_dir{i}"),
              "MAXRUNTIME"    : str(state["P3_maxruntime"]),
              "MAX_CPUS"      : str(state.get("max_cpus", 8))})
-        v(f"P4_dir{i}",
-          f"P4.jdf",
-            {"JOB_DIR"       : str(job_dir),
-             "STATE_JSON"    : state_path,
-             "DIR_INDEX"     : str(i),
-             "PHASE_LOG_DIR" : str(croot / f"P4_dir{i}"),
-             "MAXRUNTIME"    : str(state["P4_maxruntime"]),
-             "MAX_CPUS"      : str(state.get("max_cpus", 8))})
-    if n_dirs >= 2:
-            v(f"P5",
-              f"P5.jdf",
+        for name, mode, order in p4_specs_for_dir(state, i):
+            v(name,
+              f"P4.jdf",
                 {"JOB_DIR"       : str(job_dir),
                  "STATE_JSON"    : state_path,
-                 "PHASE_LOG_DIR" : str(croot / f"P5"),
-                 "MAXRUNTIME"    : str(state["P5_maxruntime"]),
-                 "MAX_CPUS"      : str(state.get("max_cpus", 8))})
+                 "DIR_INDEX"     : str(i),
+                 "PHASE_LOG_DIR" : str(croot / name),
+                 "MAXRUNTIME"    : str(state["P4_maxruntime"]),
+                 "MAX_CPUS"      : str(state.get("max_cpus", 8)),
+                 "TUNE_MODE"     : mode,
+                 "TUNE_ORDER"    : order})
+    for name, mode, order in p5_specs(state):
+        v(name,
+          f"P5.jdf",
+            {"JOB_DIR"       : str(job_dir),
+             "STATE_JSON"    : state_path,
+             "PHASE_LOG_DIR" : str(croot / name),
+             "MAXRUNTIME"    : str(state["P5_maxruntime"]),
+             "MAX_CPUS"      : str(state.get("max_cpus", 8)),
+             "TUNE_MODE"     : mode,
+             "TUNE_ORDER"    : order})
     for i in range(1, n_dirs + 1):
         v(f"P6_dir{i}",
           f"P6.jdf",
@@ -802,17 +914,17 @@ def create_dag(state, done_jobs: set[str], resume_mode: bool) -> str:
     post_script = str((job_dir / "post.sh").resolve())
     email = state.get("email", "") or ""
     if email:
-        first_job = next((j for j in dag_jobs(n_dirs) if j not in done_jobs), None)
+        first_job = next((j for j in dag_jobs(state) if j not in done_jobs), None)
         if first_job:
             if resume_mode:
                 lines.append(f"SCRIPT PRE {first_job} /bin/bash {post_script} {state_path} resume 0")
             else:
                 lines.append(f"SCRIPT PRE {first_job} /bin/bash {post_script} {state_path} init 0")
-    for job in dag_jobs(n_dirs):
+    for job in dag_jobs(state):
         if job.startswith(("P2_", "P7_")):
             lines.append(f"RETRY {job} 0")
         lines.append(f"SCRIPT POST {job} /bin/bash {post_script} {state_path} {job} $RETURN")
-    for parent, child in dag_dependencies(n_dirs):
+    for parent, child in dag_dependencies(state):
         lines.append(f"PARENT {parent} CHILD {child}")
     return "\n".join(lines) + "\n"
 
@@ -877,9 +989,10 @@ def main():
         validation_grid = "only error tune(s)"
     elif state["validation_only_merged"]:
         validation_grid = "only merged tune(s)"
-    grid_rows = [("N_GRID",          state["n_grid"]),
-                 ("GRID_SAMPLING",   state["grid_sampling"]),
-                 ("validation grid", validation_grid)]
+    grid_rows = [("N_GRID",                 state["n_grid"]),
+                 ("GRID_SAMPLING",          state["grid_sampling"]),
+                 ("validation grid",        validation_grid),
+                 ("SPLIT_TUNING_PROCEDURE", "on" if state["split_tuning_procedure"] else "off")]
     gw = max(len(k) for k, _ in grid_rows)
     for k, v in grid_rows:
         print(f"    - {k:<{gw}} : {v}")
@@ -889,7 +1002,7 @@ def main():
     if state["apprentice"]:
         app = state["apprentice"]
         print("  Apprentice settings:")
-        app_rows = [("ORDER",             app["order"]),
+        app_rows = [("ORDER",             ", ".join(app["orders"])),
                     ("APP_BUILD_OPTIONS", app["build_options"] or "(none)"),
                     ("APP_TUNE2_OPTIONS", app["tune2_options"] or "(none)")]
         if reweight_on:
@@ -901,7 +1014,7 @@ def main():
     if state["professor"]:
         prof = state["professor"]
         print("  Professor settings:")
-        prof_rows = [("ORDER",              prof["order"]),
+        prof_rows = [("ORDER",              ", ".join(prof["orders"])),
                      ("PROF2_IPOL_OPTIONS", prof["ipol_options"] or "(none)"),
                      ("PROF2_TUNE_OPTIONS", prof["tune_options"] or "(none)")]
         pw = max(len(k) for k, _ in prof_rows)
@@ -931,8 +1044,7 @@ def main():
     state_path = master_dir / "state.json"
     condor_ids = None
     if not resume_mode:
-        n_dirs = len(state["input_dirs"])
-        jobs = dag_jobs(n_dirs)
+        jobs = dag_jobs(state)
 
         condor_output = Path(state["condor_output"])
         condor_output.mkdir(parents=True, exist_ok=True)
@@ -963,7 +1075,7 @@ def main():
         Path(state["phase_times_file"]).write_text("{}\n", encoding="utf-8")
         print(f"Created phase times file: {state['phase_times_file']}")
 
-    all_jobs = set(dag_jobs(len(state["input_dirs"])))
+    all_jobs = set(dag_jobs(state))
     done_jobs = all_jobs - resume_jobs if resume_mode else set()
     if resume_mode:
         state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
