@@ -312,8 +312,13 @@ def build_state(cfg, config_path: Path):
         raise ValueError("MERGE_MODE must be 'rivet' or 'yoda'")
 
     combine_mode = str(cfg.get("COMBINE_MODE", "weighted")).strip().lower()
-    if n_dirs >= 2 and combine_mode not in {"weighted", "equal"}:
-        raise ValueError("COMBINE_MODE must be 'weighted' or 'equal' for multi-input tunes")
+    if n_dirs >= 2 and combine_mode not in {"weighted", "simple", "custom"}:
+        raise ValueError("COMBINE_MODE must be 'weighted', 'simple' or 'custom' for multi-input tunes")
+    if n_dirs >= 2 and combine_mode == "custom":
+        custom_weights = input_dirs[0] / "custom.weights.txt"
+        if not custom_weights.exists():
+            raise FileNotFoundError(f"Missing required file: {custom_weights} "
+                                    "(required in INPUT_DIR1 when COMBINE_MODE is 'custom')")
 
     validation_only_err    = parse_on_off(cfg.get("VALIDATION_ONLY_ERR", "off"), "VALIDATION_ONLY_ERR")
     validation_only_merged = parse_on_off(cfg.get("VALIDATION_ONLY_MERGED", "off"), "VALIDATION_ONLY_MERGED")
@@ -1023,7 +1028,7 @@ def main():
         print()
     if n_dirs >= 2:
         print("  Merged weights settings:")
-        print(f"    - COMBINE_MODE (combine_weights.py) : {state['combine_mode']}")
+        print(f"    - COMBINE_MODE : {state['combine_mode']}")
         print()
     if grid_warning:
         print(grid_warning)
@@ -1062,6 +1067,10 @@ def main():
                 input_dir_paths = [Path(item["path"]) for item in state["input_dirs"]]
                 write_stacked_json_values(input_dir_paths, merged_dir)
                 print(f"Created combined reference data JSON: {merged_dir / 'data.json'}")
+            if state["combine_mode"] == "custom":
+                custom_src = Path(state["input_dirs"][0]["path"]) / "custom.weights.txt"
+                shutil.copy2(custom_src, merged_dir / "custom.weights.txt")
+                print(f"Copied custom merged weights: {merged_dir / 'custom.weights.txt'}")
 
         state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
         print(f"Created state file: {state_path}")

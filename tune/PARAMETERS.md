@@ -26,6 +26,7 @@
 - `init/` - directory containing Sherpa integration results (`Process` and `Results.zip`) (obtained from e.g. `Sherpa -e 0 ...`)
 - `weights.txt` - contains the weights for all observables (can be created using `app-tools-write_weights`)
 - `data.json` (**only if `APPRENTICE` is configured**) - contains reference data for the relevant analyses (can be created using `app-datadirtojson`). Professor loads reference data automatically via `prof2-tune -R`, so it is not required for Professor-only runs.
+- `custom.weights.txt` (**only INPUT_DIR1, and only if `COMBINE_MODE: custom`**) - hand-supplied merged weight file used for the merged tunes (see `COMBINE_MODE`).
 
 ### N_GRID
 - **Type**: Integer
@@ -126,8 +127,11 @@
 ### COMBINE_MODE
 - **Type**: String
 - **Default**: `weighted`
-- **Valid Values**: `weighted`, `equal` (only for multi-input runs)
-- **Description**: Method for combining tuning results from all processes. Applied per backend and per surrogate order in P5 (each order gets its own combined weight files, since the per-process best-tune results differ per order). If `weighted` is used, the weights are automatically rescaled to balance the contribution to the global chi2 of each process, `equal` rescales all weights by 1.0.
+- **Valid Values**: `weighted`, `simple`, `custom` (only for multi-input runs)
+- **Description**: Method for combining tuning results from all processes. Applied per backend and per surrogate order in P5 (each order gets its own combined weight files, since the per-process best-tune results differ per order).
+  - `weighted`: the per-process weight files are combined and automatically rescaled to balance the contribution to the global chi2 of each process.
+  - `simple`: a plain concatenation of the per-process weight files (each rescaled by 1.0), with no chi2 balancing.
+  - `custom`: use a hand-supplied merged weight file instead of combining the per-process weights. `INPUT_DIR1` must contain a file named `custom.weights.txt`; during initialisation it is copied into `MERGED_DIR/custom.weights.txt` and then used (for both the nominal and error tunes) by every merged tune in P5, across all backends and surrogate orders.
 
 ### SPLIT_TUNING_PROCEDURE
 - **Type**: Boolean-like string

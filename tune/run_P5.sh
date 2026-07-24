@@ -98,6 +98,8 @@ run_apprentice_merged_order() {
   local required=("$MERGED_DIR/data.json")
   if [[ "$COMBINE_MODE" == "weighted" ]]; then
     required+=("${app_tunes[@]}" "${app_tunes_err[@]}")
+  elif [[ "$COMBINE_MODE" == "custom" ]]; then
+    required+=("$MERGED_DIR/custom.weights.txt")
   fi
   require_inputs "5" "$TAG" "${required[@]}"
 
@@ -110,19 +112,25 @@ run_apprentice_merged_order() {
   local tune_merged_err="$MERGED_DIR/Apprentice/tune.apprentice.err.${safe}.merged"
   rm -rf "$app_w" "$app_we" "$app_json" "$err_json" "$tune_merged" "$tune_merged_err"
 
-  local app_w_args=()
-  local app_we_args=()
-  for idx in $(seq 1 "$N_INPUT_DIRS"); do
-    if [[ "$COMBINE_MODE" == "weighted" ]]; then
-      app_w_args+=("${WEIGHTS[idx]}" "${app_tunes[idx]}")
-      app_we_args+=("${WEIGHTS[idx]}" "${app_tunes_err[idx]}")
-    else
-      app_w_args+=("${WEIGHTS[idx]}" 1.0)
-      app_we_args+=("${WEIGHTS[idx]}" 1.0)
-    fi
-  done
-  run_cmd "5" "$TAG" app-tools-combine_weights "${app_w_args[@]}"  -o "$app_w"
-  run_cmd "5" "$TAG" app-tools-combine_weights "${app_we_args[@]}" -o "$app_we"
+  if [[ "$COMBINE_MODE" == "custom" ]]; then
+    log_msg "5" "$TAG" "Using custom merged weights: $MERGED_DIR/custom.weights.txt"
+    cp "$MERGED_DIR/custom.weights.txt" "$app_w"
+    cp "$MERGED_DIR/custom.weights.txt" "$app_we"
+  else
+    local app_w_args=()
+    local app_we_args=()
+    for idx in $(seq 1 "$N_INPUT_DIRS"); do
+      if [[ "$COMBINE_MODE" == "weighted" ]]; then
+        app_w_args+=("${WEIGHTS[idx]}" "${app_tunes[idx]}")
+        app_we_args+=("${WEIGHTS[idx]}" "${app_tunes_err[idx]}")
+      else
+        app_w_args+=("${WEIGHTS[idx]}" 1.0)
+        app_we_args+=("${WEIGHTS[idx]}" 1.0)
+      fi
+    done
+    run_cmd "5" "$TAG" app-tools-combine_weights "${app_w_args[@]}"  -o "$app_w"
+    run_cmd "5" "$TAG" app-tools-combine_weights "${app_we_args[@]}" -o "$app_we"
+  fi
 
   run_cmd "5" "$TAG" app-build "${SCANS[@]}" --order "$order" -w "$app_w"         -o "$app_json" "${APP_BUILD_OPTS[@]}"
   run_cmd "5" "$TAG" app-build "${SCANS[@]}" --order "$order" -w "$app_we" --errs -o "$err_json" "${APP_BUILD_OPTS[@]}"
@@ -152,6 +160,8 @@ run_professor_merged_order() {
   local required=("${prof_ipols[@]}" "${prof_ipols_err[@]}")
   if [[ "$COMBINE_MODE" == "weighted" ]]; then
     required+=("${prof_tunes[@]}" "${prof_tunes_err[@]}")
+  elif [[ "$COMBINE_MODE" == "custom" ]]; then
+    required+=("$MERGED_DIR/custom.weights.txt")
   fi
   require_inputs "5" "$TAG" "${required[@]}"
 
@@ -162,19 +172,25 @@ run_professor_merged_order() {
   local tune_merged_err="$MERGED_DIR/Professor/tune.professor.err.${safe}.merged"
   rm -rf "$prof_w" "$prof_we" "$tune_merged" "$tune_merged_err"
 
-  local prof_w_args=()
-  local prof_we_args=()
-  for idx in $(seq 1 "$N_INPUT_DIRS"); do
-    if [[ "$COMBINE_MODE" == "weighted" ]]; then
-      prof_w_args+=("${WEIGHTS[idx]}" "${prof_tunes[idx]}")
-      prof_we_args+=("${WEIGHTS[idx]}" "${prof_tunes_err[idx]}")
-    else
-      prof_w_args+=("${WEIGHTS[idx]}" 1.0)
-      prof_we_args+=("${WEIGHTS[idx]}" 1.0)
-    fi
-  done
-  run_cmd "5" "$TAG" app-tools-combine_weights "${prof_w_args[@]}"  -o "$prof_w"
-  run_cmd "5" "$TAG" app-tools-combine_weights "${prof_we_args[@]}" -o "$prof_we"
+  if [[ "$COMBINE_MODE" == "custom" ]]; then
+    log_msg "5" "$TAG" "Using custom merged weights: $MERGED_DIR/custom.weights.txt"
+    cp "$MERGED_DIR/custom.weights.txt" "$prof_w"
+    cp "$MERGED_DIR/custom.weights.txt" "$prof_we"
+  else
+    local prof_w_args=()
+    local prof_we_args=()
+    for idx in $(seq 1 "$N_INPUT_DIRS"); do
+      if [[ "$COMBINE_MODE" == "weighted" ]]; then
+        prof_w_args+=("${WEIGHTS[idx]}" "${prof_tunes[idx]}")
+        prof_we_args+=("${WEIGHTS[idx]}" "${prof_tunes_err[idx]}")
+      else
+        prof_w_args+=("${WEIGHTS[idx]}" 1.0)
+        prof_we_args+=("${WEIGHTS[idx]}" 1.0)
+      fi
+    done
+    run_cmd "5" "$TAG" app-tools-combine_weights "${prof_w_args[@]}"  -o "$prof_w"
+    run_cmd "5" "$TAG" app-tools-combine_weights "${prof_we_args[@]}" -o "$prof_we"
+  fi
 
   run_cmd "5" "$TAG" prof2-tune "${prof_ipols[@]}"     -w "$prof_w"  -R -o "$tune_merged"     "${PROF_TUNE_OPTS[@]}"
   run_cmd "5" "$TAG" prof2-tune "${prof_ipols_err[@]}" -w "$prof_we" -R -o "$tune_merged_err" "${PROF_TUNE_OPTS[@]}"
