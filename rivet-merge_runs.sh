@@ -49,7 +49,7 @@ if [ $# -lt 1 ]; then
     echo "Usage: $0 [--rm] [--chunked N] [--nmax N] [--quiet] [--gz] [--output|-o DIR] <folder1> [<folder2> ...] [nproc]"
     echo "  <folder>        : Directory containing subfolders with YODA files."
     echo "  [nproc]         : Number of parallel jobs (default: 4). Use 1 for sequential processing."
-    echo "  --rm            : (Optional) Remove merged subdirectories after successful merge to free space."
+    echo "  --rm            : (Optional) Remove the subdirectories whose YODA files were merged (subdirs without a YODA, or skipped via --nmax, are kept)."
     echo "  --chunked N     : (Optional) Merge in chunks of N files (reduces memory usage). Processes nproc chunks in parallel."
     echo "  --nmax N        : (Optional) Maximum number of yoda files to merge per directory (default: all)."
     echo "  --quiet|-q      : (Optional) Call rivet-merge with --quiet, supress messages about removed subdirectories."
@@ -110,6 +110,18 @@ rivet_merge() {
     fi
 }
 
+remove_merged_subdirs() {
+    local -A seen=()
+    local file subdir
+    for file in "$@"; do
+        subdir=$(dirname "$file")
+        [ -n "${seen[$subdir]}" ] && continue
+        seen["$subdir"]=1
+        [ "$QUIET" = false ] && echo "Removing $subdir..."
+        rm -rf "$subdir"
+    done
+}
+
 merge_dir() {
     dir="$1"
     YODA=$(basename "$dir")
@@ -148,13 +160,8 @@ merge_dir() {
             echo "Merging YODA files into $OUTFILE..."
             rivet_merge "${FILES[@]}" "$OUTFILE"
             if [ "$REMOVE_SUBDIRS" = true ] && [ -f "$OUTFILE" ] && [ -z "$OUTPUT_DIR" ]; then
-                for subdir in "$dir"/*; do
-                    echo "Removing subdirectories in $dir..."
-                    if [ -d "$subdir" ]; then
-                        [ "$QUIET" = false ] && echo "Removing $subdir..."
-                        rm -rf "$subdir"
-                    fi
-                done
+                [ "$QUIET" = false ] && echo "Removing merged subdirectories in $dir..."
+                remove_merged_subdirs "${FILES[@]}"
             fi
         fi
     fi
@@ -198,13 +205,8 @@ merge_flat() {
             echo "Merging YODA files from all subdirectories into $OUTFILE..."
             rivet_merge "${FILES[@]}" "$OUTFILE"
             if [ "$REMOVE_SUBDIRS" = true ] && [ -f "$OUTFILE" ] && [ -z "$OUTPUT_DIR" ]; then
-                echo "Removing subdirectories in $PREFIX..."
-                for subdir in "$PREFIX"/*; do
-                    if [ -d "$subdir" ]; then
-                        [ "$QUIET" = false ] && echo "Removing $subdir..."
-                        rm -rf "$subdir"
-                    fi
-                done
+                [ "$QUIET" = false ] && echo "Removing merged subdirectories in $PREFIX..."
+                remove_merged_subdirs "${FILES[@]}"
             fi
         fi
     fi
@@ -289,13 +291,8 @@ merge_chunked() {
         trap - EXIT INT TERM
 
         if [ "$REMOVE_SUBDIRS" = true ] && [ -f "$outfile" ] && [ -z "$OUTPUT_DIR" ]; then
-            echo "Removing subdirectories in $dir..."
-            for subdir in "$dir"/*; do
-                if [ -d "$subdir" ] && [ "$subdir" != "$temp_dir" ]; then
-                    [ "$QUIET" = false ] && echo "Removing $subdir..."
-                    rm -rf "$subdir"
-                fi
-            done
+            [ "$QUIET" = false ] && echo "Removing merged subdirectories in $dir..."
+            remove_merged_subdirs "${files[@]}"
         fi
         echo "Successfully created $outfile."
     else
@@ -310,6 +307,7 @@ export -f merge_dir
 export -f merge_flat
 export -f merge_chunked
 export -f rivet_merge
+export -f remove_merged_subdirs
 export REMOVE_SUBDIRS
 export CHUNK_SIZE
 export NPROC
