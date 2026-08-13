@@ -11,8 +11,9 @@ Before running, set the same kind of user-specific paths/configuration as descri
 	- `APP_BUILD_INSTALLATION`
 	- `RIVET_ENVIRONMENT`
 2. In `build.jdf`, set:
-	- `USERNAME`
 	- optional: `NEWSCANDIR`, `LOGDIR`, `MAXRUNTIME`
+
+	`USERNAME` is filled in automatically from the account you submit with and normally needs no change.
 
 
 ## Workflow

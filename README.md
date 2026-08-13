@@ -29,12 +29,10 @@ This local copy is required if you want the job dashboard described in [section 
 
 ### 2. Configure the HTCondor submit file
 
-Edit `sherpa.jdf` and replace `YOUR_USERNAME` with your actual ROCKS username on the second line.
-
-Example:
+`USERNAME` on the second line is filled in automatically from the account you submit with, so you do not need to change it:
 
 ```bash
-USERNAME    = moritz.pabst
+USERNAME    = $ENV(USER)
 ```
 
 Set the path to your Sherpa binary (relative to your ROCKS home directory).

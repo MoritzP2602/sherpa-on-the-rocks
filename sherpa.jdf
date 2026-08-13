@@ -1,5 +1,5 @@
 Executable  = /bin/bash
-USERNAME    = YOUR_USERNAME
+USERNAME    = $ENV(USER)
 LOGDIR      = condor_output
 MAXRUNTIME  = 86400
 SHERPA      = /PATH/TO/SHERPA/INSTALLATION/bin/Sherpa
