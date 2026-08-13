@@ -23,7 +23,9 @@ mv sherpa-on-the-rocks /net/theorie/rocks/$USER
 
 If you choose to move `sherpa-on-the-rocks` to a different directory, adjust all subsequent commands accordingly.
 
-Note: It may be convenient to also keep a copy of `sherpa-on-the-rocks` in your local home directory, so you can run the excat same commands on your local machine and on the cluster, without having to adjust the paths in the commands below (run `cp -r /net/theorie/rocks/$USER/sherpa-on-the-rocks ~/`).
+Note: It may be convenient to also keep a copy of `sherpa-on-the-rocks` in your local home directory, so you can run the exact same commands on your local machine and on the cluster, without having to adjust the paths in the commands below (run `cp -r /net/theorie/rocks/$USER/sherpa-on-the-rocks ~/`).
+
+This local copy is required if you want the job dashboard described in [section 5](#5-monitoring-jobs-on-your-webpage).
 
 ### 2. Configure the HTCondor submit file
 
@@ -206,6 +208,14 @@ python3 ~/sherpa-on-the-rocks/runtime.py condor_output/job.<cluster>.*
 ```
 
 Note: If you changed the condor output directory, you need to adjust the directory in the command above.
+
+## 5. Monitoring jobs on your webpage
+
+Instead of logging into the cluster to run `condor_q`, you can publish an overview of your jobs on your institute webpage: which clusters are running now, and what completed, failed or timed out over the last week.
+
+It reads the `overview.<cluster>.log` files, so it only covers jobs submitted with the scripts in this repository. A timer on an always-on institute host refreshes it every five minutes.
+
+See [condor-dashboard/README.md](condor-dashboard/README.md) for the setup.
 
 
 This completes a typical Sherpa production cycle on ROCKS: initialize, split into subruns, submit via HTCondor, then merge the resulting YODA files. The scripts `prepare_runs.sh` and `yodamerge_runs.sh`/`rivet-merge_runs.sh` offer additional features. Run them without arguments to see all available options:
