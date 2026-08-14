@@ -4,11 +4,6 @@ This directory generates a static overview of your HTCondor jobs and publishes i
 on your institute webpage, so you can check on a production run from anywhere
 without logging into the cluster.
 
-The index page lists every cluster running right now, and everything submitted in
-the last 7 days with its completed/failed/timeout counts. Each cluster links to a
-detail page listing the jobs that failed or hit the wall time limit, plus the raw
-`overview.<cluster>.log`.
-
 It reads the `overview.<cluster>.log` files written by `run_sherpa.sh`, so it
 only reports on jobs submitted with the scripts in this repository.
 
@@ -155,8 +150,18 @@ systemctl --user start condor-dashboard.service
 ls -l ~/www/condor/
 ```
 
-You should see `index.html` and one `<cluster>.html` plus
-`overview.<cluster>.log` per recent cluster. Your dashboard is now at
+You should see this, with one pair of files under `clusters/` per recent cluster:
+
+```
+~/www/condor/
+├── index.html
+├── icons/sherpa.png
+└── clusters/
+    ├── 38675226.html
+    └── overview.38675226.log
+```
+
+`clusters/` is created for you on the first run. Your dashboard is now at
 `https://www.theorie.physik.uni-goettingen.de/~$USER/condor/`.
 
 
@@ -168,14 +173,26 @@ it was generated, and shows a warning banner if it is more than 30 minutes old.
 ```bash
 ssh ds9 '~/sherpa-on-the-rocks/condor-dashboard/generate.py'         # refresh now
 ssh ds9 '~/sherpa-on-the-rocks/condor-dashboard/forget.py <cluster>' # drop a cluster
+ssh ds9 '~/sherpa-on-the-rocks/condor-dashboard/forget.py --all'     # empty the dashboard
 ```
 
-`forget.py` removes a cluster from the dashboard: its line in `~/.condor-registry`
-on ROCKS, its cached state, and its page and copied log. It does **not** touch
-your job output: the real `condor_output/` and its `overview.<cluster>.log` on
-the cluster are left alone. It refuses to forget a cluster that still has jobs in
-the queue, since `condor_q` would just put it straight back.
+`forget.py` hides a cluster from the dashboard by appending its id to
+`~/.config/condor-dashboard/forgotten` on `ds9`, then drops its cached state, its
+page and its copied log. It refuses to forget a cluster that still has jobs in
+the queue.
+
+`forget.py --all` does the same for every cluster the dashboard currently lists,
+leaving anything still in the queue alone and naming what it kept.
+
+**Nothing is ever deleted, and nothing is written to the cluster.**
+`~/.condor-registry` on ROCKS is append-only — only the `condor_submit` wrapper
+writes to it — because what your dashboard chooses to display is not the
+cluster's business. Forgetting is a filter, not a deletion, which makes it
+reversible: delete a line from the forget list, rerun `generate.py`, and the
+cluster comes back with its name and counts intact. The file takes `#` comments,
+so you can note why something was hidden.
 
 Clusters disappear from the dashboard on their own 7 days after submission, so
 `forget.py` is only for clearing something out early. Change `RETENTION_DAYS` in
-`generate.py` if you want a different window.
+`generate.py` if you want a different window — and because the registry keeps
+everything, raising it retroactively brings older clusters back into view.

@@ -68,6 +68,8 @@ OUT_DIR = os.path.expanduser("~/www/condor")
 SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15"]
 STATE_FILE = os.path.expanduser("~/.cache/condor-dashboard/state.json")
 REGISTRY_PATH = "$HOME/.condor-registry"
+
+FORGOTTEN_FILE = os.path.expanduser("~/.config/condor-dashboard/forgotten")
 RETENTION_DAYS = 7
 STALE_MINUTES = 30
 SSH_TIMEOUT = 120
@@ -79,9 +81,12 @@ FILE_MARKER = "@@CONDOR-DASH-FILE@@"
 ICON_DIR = "icons"
 ICON_SUFFIXES = (".png", ".svg", ".jpg", ".jpeg", ".webp", ".gif", ".avif")
 
-# Shown on each cluster page as click-to-copy commands. Static hosting cannot act
-# on its own, so the page offers the command and the CLI does the work.
+CLUSTER_DIR = "clusters"
+
+# Shown on each cluster page as click-to-copy commands.
 FORGET_COMMAND = "ssh {} '{}/forget.py {{cluster}}'".format(DASH_HOST, DASH_DIR)
+FORGET_GENERIC_COMMAND = "ssh {} '{}/forget.py CLUSTER_ID'".format(DASH_HOST, DASH_DIR)
+FORGET_ALL_COMMAND = "ssh {} '{}/forget.py --all'".format(DASH_HOST, DASH_DIR)
 REFRESH_COMMAND = "ssh {} '{}/generate.py'".format(DASH_HOST, DASH_DIR)
 
 # HTCondor JobStatus codes.
@@ -242,6 +247,28 @@ def parse_registry(text):
     return registry
 
 
+def parse_forgotten(text):
+    """Cluster ids recorded as forgotten, one per line.
+
+    Anything that is not a bare number is ignored, so the file can be commented
+    and hand-edited: deleting a line here brings a cluster back.
+    """
+    return {line.strip() for line in text.splitlines() if line.strip().isdigit()}
+
+
+def load_forgotten(path=None):
+    """The forget list, or an empty set if it has never been written.
+
+    Resolves the path when called rather than binding it as a default, so a test
+    that redirects FORGOTTEN_FILE is actually obeyed.
+    """
+    try:
+        with open(path or FORGOTTEN_FILE) as handle:
+            return parse_forgotten(handle.read())
+    except OSError:
+        return set()
+
+
 def _field(fields, index):
     """Return a cleaned optional field, treating ClassAd 'undefined' as absent."""
     if len(fields) <= index:
@@ -334,15 +361,20 @@ def split_fetched_logs(stream, marker=FILE_MARKER):
 # ---------------------------------------------------------------- selection
 
 
-def select_clusters(registry, queue, mtimes, now, retention_days=RETENTION_DAYS):
+def select_clusters(registry, queue, mtimes, now, retention_days=RETENTION_DAYS,
+                    forgotten=()):
     """Choose which clusters to display, newest first.
 
     A cluster is shown if it has jobs in the queue right now, or was submitted
-    within the retention window.
+    within the retention window, and has not been forgotten. Forgetting is a
+    filter applied here rather than a deletion from the registry, so the record
+    of what was submitted survives.
     """
     cutoff = now - timedelta(days=retention_days)
     selections = []
     for cluster in set(registry) | set(queue):
+        if cluster in forgotten:
+            continue
         entry = registry.get(cluster)
         state = queue.get(cluster)
 
@@ -387,6 +419,10 @@ a{color:#1565c0;text-decoration:none}a:hover{text-decoration:underline}
 .pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:.8em;font-weight:600}
 .run{background:#e3f2ea;color:#1b7a43}.idle{background:#eef1f4;color:#667}
 .bad{background:#fdecea;color:#b3261e}.warn{background:#fff4e5;color:#9a5b00}
+.zero{background:#f4f6f8;color:#aeb6be}
+.more td{border-top:none;padding:0 14px 11px;color:#8a949e;font-size:.85em}
+.more .pill{font-size:.9em}
+tr:hover+tr.more td{background:#f7fafd}
 .none{color:#8a949e;font-style:italic;padding:14px 0}
 .banner{background:#fdecea;color:#b3261e;padding:11px 14px;border-radius:8px;
 font-size:.9em;margin-bottom:14px}
@@ -398,10 +434,13 @@ border-radius:20px;padding:2px 9px;margin-left:7px;white-space:nowrap}
 .bar{height:4px;background:#eef1f4;border-radius:3px;margin-top:9px;overflow:hidden;max-width:190px}
 .bar span{display:block;height:100%;background:#1b7a43}
 .kicon{height:1.15em;width:auto;vertical-align:-.22em;border-radius:2px}
-.cmds{margin-top:26px}
-.cmd{margin:0 0 8px;font-size:.85em;color:#5a6570}
+/* Label, command and button are grid items, not inline text, so the three line
+   up in columns however long an individual label or command is. */
+.cmds{margin-top:26px;display:grid;grid-template-columns:auto auto auto;
+justify-content:start;align-items:center;gap:7px 10px}
+.cmd{display:contents;font-size:.85em;color:#5a6570}
 .cmd code{background:#f1f4f7;padding:3px 7px;border-radius:5px;word-break:break-all}
-.copy{margin-left:7px;font:inherit;color:#1565c0;background:none;border:1px solid #cfd8e0;
+.copy{font:inherit;color:#1565c0;background:none;border:1px solid #cfd8e0;
 border-radius:5px;padding:2px 10px;cursor:pointer}
 .copy:hover{background:#f1f4f7}
 """
@@ -448,22 +487,51 @@ def _name(selection):
     return "unknown"
 
 
-def _icon_html(icon):
-    """Render an icon that is either an emoji or an image file in ICON_DIR."""
+def _icon_html(icon, prefix=""):
+    """Render an icon that is either an emoji or an image file in ICON_DIR.
+
+    `prefix` is how far the page is below OUT_DIR ("../" for a cluster page):
+    icons/ sits at the top level and every page reaches it relatively.
+    """
     if not icon:
         return ""
     if icon.lower().endswith(ICON_SUFFIXES):
-        return f'<img class="kicon" src="{ICON_DIR}/{_esc(icon)}" alt="">'
+        return f'<img class="kicon" src="{prefix}{ICON_DIR}/{_esc(icon)}" alt="">'
     return _esc(icon)
 
 
-def _badge(selection):
+def _badge(selection, prefix=""):
     """A small pill naming the job type, e.g. Sherpa-logo for Sherpa."""
     icon, label = job_kind(selection.cmdline, selection.submit_file)
     if not label:
         return ""
-    rendered = _icon_html(icon)
+    rendered = _icon_html(icon, prefix)
     return f'<span class="kind">{rendered}{" " if rendered else ""}{_esc(label)}</span>'
+
+
+COUNTERS = [("done", "idle"), ("ok", "run"), ("timeout", "warn"), ("failed", "bad")]
+
+
+def _count(value, css):
+    """A count as a coloured pill. Zero stays neutral grey whatever the column,
+    so an empty failure column does not read as an alarm from across the room.
+    """
+    return f"<span class='pill {css if value else 'zero'}'>{value}</span>"
+
+
+def _counts(summary):
+    """All four counters as labelled pills, for use outside a table column."""
+    return " &middot; ".join(f"{_count(getattr(summary, field), css)} {field}"
+                             for field, css in COUNTERS)
+
+
+def _command(label, command):
+    """One click-to-copy command row: three grid items the .cmds grid aligns
+    into columns. The label needs its own element to be one of them.
+    """
+    return (f'<p class="cmd"><span>{_esc(label)}</span>'
+            f"<code>{_esc(command)}</code>"
+            f'<button class="copy" data-cmd="{_esc(command)}">copy</button></p>')
 
 
 def _when(moment):
@@ -485,6 +553,7 @@ def _page(title, body, generated_at):
 def render_index(selections, summaries, generated_at, queue_ok=True):
     """Render the dashboard index."""
     running = [s for s in selections if s.queue and s.queue.total > 0]
+    finished = [s for s in selections if not (s.queue and s.queue.total > 0)]
 
     parts = ["<h1>Condor jobs</h1>",
              f'<p class="sub">{_esc(USERNAME)} on {_esc(SSH_HOST)}</p>']
@@ -505,26 +574,34 @@ def render_index(selections, summaries, generated_at, queue_ok=True):
                 "<th class='num'>Idle</th><th class='num'>Held</th><th>Directory</th></tr>"]
         for sel in running:
             pct = 100 * sel.queue.running // sel.queue.total if sel.queue.total else 0
+            name = _esc(_name(sel))
+            if sel.cluster in summaries:
+                name = f"<a href='{CLUSTER_DIR}/{_esc(sel.cluster)}.html'>{name}</a>"
             rows.append(
                 f"<tr><td>{_esc(sel.cluster)}</td>"
-                f"<td>{_esc(_name(sel))}{_badge(sel)}"
+                f"<td>{name}{_badge(sel)}"
                 f"<div class='bar'><span style='width:{pct}%'></span></div></td>"
                 f"<td class='num'><span class='pill run'>{sel.queue.running}</span></td>"
                 f"<td class='num'><span class='pill idle'>{sel.queue.idle}</span></td>"
                 f"<td class='num'>{sel.queue.held or ''}</td>"
                 f"<td class='path'>{_esc(sel.submit_dir)}</td></tr>"
             )
+            progress = summaries.get(sel.cluster)
+            if progress and progress.done:
+                rows.append("<tr class='more'><td></td>"
+                            f"<td colspan='5'>so far {_counts(progress)}</td></tr>")
         parts.append("<table>" + "".join(rows) + "</table>")
 
-    parts.append(f"<h2>Recent (last {RETENTION_DAYS} days)</h2>")
-    if not selections:
-        parts.append('<p class="none">Nothing submitted in the last '
+    heading = "Finished" if queue_ok else "Recent"
+    parts.append(f"<h2>{heading} (last {RETENTION_DAYS} days)</h2>")
+    if not finished:
+        parts.append('<p class="none">Nothing finished in the last '
                      f"{RETENTION_DAYS} days.</p>")
     else:
         rows = ["<tr><th>Cluster</th><th>Name</th><th class='num'>Done</th>"
-                "<th class='num'>OK</th><th class='num'>Failed</th>"
-                "<th class='num'>Timeout</th><th>Submitted</th><th>Directory</th></tr>"]
-        for sel in selections:
+                "<th class='num'>OK</th><th class='num'>Timeout</th>"
+                "<th class='num'>Failed</th><th>Submitted</th><th>Directory</th></tr>"]
+        for sel in finished:
             summary = summaries.get(sel.cluster)
             name = _esc(_name(sel))
             badge = _badge(sel)
@@ -532,23 +609,24 @@ def render_index(selections, summaries, generated_at, queue_ok=True):
                 cells = (f"<td>{name}{badge}</td>"
                          f"<td colspan='4' class='none'>no overview file</td>")
             else:
-                link = f"<a href='{_esc(sel.cluster)}.html'>{name}</a>{badge}"
-                failed = (f"<span class='pill bad'>{summary.failed}</span>"
-                          if summary.failed else "0")
-                timeout = (f"<span class='pill warn'>{summary.timeout}</span>"
-                           if summary.timeout else "0")
-                cells = (f"<td>{link}</td><td class='num'>{summary.done}</td>"
-                         f"<td class='num'>{summary.ok}</td>"
-                         f"<td class='num'>{failed}</td><td class='num'>{timeout}</td>")
+                link = (f"<a href='{CLUSTER_DIR}/{_esc(sel.cluster)}.html'>{name}</a>"
+                        f"{badge}")
+                counts = "".join(
+                    f"<td class='num'>{_count(getattr(summary, field), css)}</td>"
+                    for field, css in COUNTERS
+                )
+                cells = f"<td>{link}</td>{counts}"
             rows.append(f"<tr><td>{_esc(sel.cluster)}</td>{cells}"
                         f"<td>{_when(sel.timestamp)}</td>"
                         f"<td class='path'>{_esc(sel.submit_dir)}</td></tr>")
         parts.append("<table>" + "".join(rows) + "</table>")
 
     parts.append(
-        '<div class="cmds"><p class="cmd">Update this dashboard now '
-        f'<code>{_esc(REFRESH_COMMAND)}</code>'
-        f'<button class="copy" data-cmd="{_esc(REFRESH_COMMAND)}">copy</button></p></div>'
+        '<div class="cmds">'
+        + _command("Update this dashboard now", REFRESH_COMMAND)
+        + _command("Remove an entry from the dashboard", FORGET_GENERIC_COMMAND)
+        + _command(f"Empty the whole {RETENTION_DAYS} day history", FORGET_ALL_COMMAND)
+        + "</div>"
     )
 
     return _page("Condor jobs", "\n".join(parts), generated_at)
@@ -557,13 +635,12 @@ def render_index(selections, summaries, generated_at, queue_ok=True):
 def render_cluster(selection, summary, log_name, generated_at):
     """Render the per-cluster detail page: counts plus the problem entries."""
     parts = [
-        '<a class="back" href="index.html">&larr; all clusters</a>',
+        '<a class="back" href="../index.html">&larr; all clusters</a>',
         f"<h1>Cluster {_esc(selection.cluster)}</h1>",
-        f'<p class="sub">{_esc(_name(selection))}{_badge(selection)} &middot; '
+        f'<p class="sub">{_esc(_name(selection))}{_badge(selection, "../")} &middot; '
         f"submitted {_when(selection.timestamp)}</p>",
         f'<p class="path">{_esc(selection.submit_dir)}</p>',
-        f'<p class="sub">{summary.done} reported &middot; {summary.ok} ok &middot; '
-        f"{summary.failed} failed &middot; {summary.timeout} timeout"
+        '<p class="sub">' + _counts(summary)
         + (f" &middot; {summary.unparsed} unparsed" if summary.unparsed else "")
         + f' &middot; <a href="{_esc(log_name)}">raw {_esc(log_name)}</a></p>',
     ]
@@ -587,13 +664,9 @@ def render_cluster(selection, summary, log_name, generated_at):
         parts.append("<table>" + "".join(rows) + "</table>")
 
     forget = FORGET_COMMAND.format(cluster=selection.cluster)
-    parts.append(
-        '<div class="cmds">'
-        '<p class="cmd">Remove this cluster from the dashboard '
-        f'<code>{_esc(forget)}</code>'
-        f'<button class="copy" data-cmd="{_esc(forget)}">copy</button></p>'
-        '</div>'
-    )
+    parts.append('<div class="cmds">'
+                 + _command("Remove this cluster from the dashboard", forget)
+                 + "</div>")
 
     return _page(f"Cluster {selection.cluster}", "\n".join(parts), generated_at)
 
@@ -606,9 +679,10 @@ def build_pages(selections, summaries, raw_logs, generated_at, queue_ok=True):
         if summary is None:
             continue
         log_name = f"overview.{sel.cluster}.log"
-        pages[f"{sel.cluster}.html"] = render_cluster(sel, summary, log_name, generated_at)
+        pages[f"{CLUSTER_DIR}/{sel.cluster}.html"] = render_cluster(
+            sel, summary, log_name, generated_at)
         if sel.cluster in raw_logs:
-            pages[log_name] = raw_logs[sel.cluster]
+            pages[f"{CLUSTER_DIR}/{log_name}"] = raw_logs[sel.cluster]
     return pages
 
 
@@ -620,12 +694,13 @@ _GENERATED = re.compile(r"^(index\.html|\d+\.html|overview\.\d+\.log)$")
 def atomic_write(path, content):
     """Write via a temp file and rename, so a reader never sees a partial page."""
     directory = os.path.dirname(path) or "."
-    os.makedirs(directory, exist_ok=True)
+    if not os.path.isdir(directory):
+        os.makedirs(directory, exist_ok=True)
+        os.chmod(directory, 0o755)
     handle, temp = tempfile.mkstemp(dir=directory, prefix=".tmp-")
     try:
         with os.fdopen(handle, "w") as fh:
             fh.write(content)
-        # mkstemp creates 0600; the web server must be able to read the result.
         os.chmod(temp, 0o644)
         os.replace(temp, path)
     except BaseException:
@@ -635,15 +710,22 @@ def atomic_write(path, content):
 
 
 def prune(directory, keep):
-    """Delete generated files no longer wanted. Leaves unrelated files alone."""
-    if not os.path.isdir(directory):
-        return
-    for name in os.listdir(directory):
-        if _GENERATED.match(name) and name not in keep:
-            try:
-                os.unlink(os.path.join(directory, name))
-            except OSError:
-                pass
+    """Delete generated files no longer wanted. Leaves unrelated files alone.
+
+    Sweeps the top level and the cluster subfolder, matching `keep` against the
+    path relative to OUT_DIR. Sweeping the top level still matters after the move
+    to a subfolder: it is what clears out pages left by the old flat layout.
+    """
+    for sub in ("", CLUSTER_DIR):
+        folder = os.path.join(directory, sub)
+        if not os.path.isdir(folder):
+            continue
+        for name in os.listdir(folder):
+            if _GENERATED.match(name) and os.path.join(sub, name) not in keep:
+                try:
+                    os.unlink(os.path.join(folder, name))
+                except OSError:
+                    pass
 
 
 # ---------------------------------------------------------------- remote access
@@ -672,6 +754,15 @@ echo "#LOGS"
 done
 echo "#END"
 """
+
+
+def inventory_script():
+    """The one-round-trip inventory fetch, with its paths filled in.
+
+    A function rather than a formatted constant so adding a path cannot leave a
+    caller behind with a KeyError.
+    """
+    return _INVENTORY_SCRIPT % {"registry": REGISTRY_PATH}
 
 
 def run_remote(script, host=SSH_HOST, timeout=SSH_TIMEOUT):
@@ -760,15 +851,17 @@ def main():
     state = load_state()
     clusters = state.get("clusters", {})
 
-    ok, output = run_remote(_INVENTORY_SCRIPT % {"registry": REGISTRY_PATH})
+    ok, output = run_remote(inventory_script())
 
     if ok:
         queue = parse_condor_q(_section(output, "QUEUE"))
         registry = parse_registry(_section(output, "REGISTRY"))
+        forgotten = load_forgotten()
         inventory = parse_inventory(_section(output, "LOGS"))
         mtimes = {c: datetime.fromtimestamp(i.mtime, timezone.utc)
                   for c, i in inventory.items()}
-        selections = select_clusters(registry, queue, mtimes, now)
+        selections = select_clusters(registry, queue, mtimes, now,
+                                     forgotten=forgotten)
 
         stale = [inventory[s.cluster].path for s in selections
                  if s.cluster in inventory
@@ -821,8 +914,8 @@ def main():
     keep = {"index.html"}
     for sel in selections:
         if sel.cluster in summaries:
-            keep.add(f"{sel.cluster}.html")
-            keep.add(f"overview.{sel.cluster}.log")
+            keep.add(os.path.join(CLUSTER_DIR, f"{sel.cluster}.html"))
+            keep.add(os.path.join(CLUSTER_DIR, f"overview.{sel.cluster}.log"))
     prune(OUT_DIR, keep)
 
     save_state({"clusters": clusters})

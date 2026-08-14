@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
-"""Remove clusters from the Condor dashboard.
+"""Hide clusters from the Condor dashboard.
 
-This deletes the cluster's line from ~/.condor-registry on rocks, its cached
-state, and (on the next generator run) its page and copied overview log from
-~/www/condor.
+This appends the cluster id to ~/.config/condor-dashboard/forgotten on this host,
+drops its cached state, and (on the next generator run) removes its page and
+copied overview log from ~/www/condor.
 
-It does NOT touch the job output on the cluster: the real
-<submitdir>/condor_output/ and its overview.<cluster>.log are left alone.
+Nothing is deleted, and nothing is written to the cluster: ~/.condor-registry on
+rocks keeps its record of every submission, and the job output there -- the real
+<submitdir>/condor_output/ and its overview.<cluster>.log -- is left alone. To
+bring a cluster back, delete its line from the forget list and rerun generate.py.
 
 Usage:
     forget.py <cluster> [<cluster> ...]
+    forget.py --all              everything the dashboard currently lists
 """
 
 from __future__ import annotations
 
 import os
 import sys
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -32,46 +36,61 @@ def validate_clusters(clusters):
     return [str(c) for c in clusters]
 
 
-def forget_script(clusters):
-    """Bash that drops the given clusters' registry lines, under the same lock
-    the submit wrapper uses.
+def record_forgotten(clusters, path=None):
+    """Append the given ids to the local forget list, skipping known ones.
 
-    Uses awk on field 1 rather than a grep regex: `grep -E` does not interpret
-    \\t as a tab, which silently matched nothing and deleted nothing.
+    A plain append, with no lock: this file is written only by this script, on
+    the one host that generates the dashboard. Returns the ids actually added.
     """
-    if not clusters:
-        return ""
-    ids = " ".join(clusters)
-    return """
-set -u
-REG="$HOME/.condor-registry"
-[ -f "$REG" ] || exit 0
-{
-  flock -x 200
-  tmp=$(mktemp "${REG}.XXXXXX") || exit 1
-  awk -F'\\t' -v ids='%(ids)s' \\
-    'BEGIN{n=split(ids,a," ");for(i=1;i<=n;i++)drop[a[i]]=1} !($1 in drop)' \\
-    "$REG" > "$tmp" && mv "$tmp" "$REG" || rm -f "$tmp"
-} 200>>"$REG.lock"
-""" % {"ids": ids}
+    path = path or generate.FORGOTTEN_FILE
+    known = generate.load_forgotten(path)
+    added = [c for c in clusters if c not in known]
+    if not added:
+        return []
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a") as handle:
+        for cluster in added:
+            handle.write(cluster + "\n")
+    return added
 
 
-def forget_clusters(clusters, remote=generate.run_remote, state=None):
-    """Drop the clusters from the registry and the state cache.
+def listed_clusters(output, now=None):
+    """The clusters the dashboard is currently showing, from one inventory fetch.
 
-    Returns (ok, message). The state cache is only modified once the remote
-    edit has succeeded, so a failed run leaves everything consistent.
+    Runs the generator's own selection rather than reading the state cache, so
+    --all clears exactly what the pages list. Going by the cache would miss a
+    cluster the registry has but the last run did not see, and it would come
+    straight back on the next run.
+    """
+    registry = generate.parse_registry(generate._section(output, "REGISTRY"))
+    queue = generate.parse_condor_q(generate._section(output, "QUEUE"))
+    forgotten = generate.load_forgotten()
+    inventory = generate.parse_inventory(generate._section(output, "LOGS"))
+    mtimes = {cluster: datetime.fromtimestamp(item.mtime, timezone.utc)
+              for cluster, item in inventory.items()}
+    selections = generate.select_clusters(
+        registry, queue, mtimes, now or datetime.now(timezone.utc),
+        forgotten=forgotten)
+    return [s.cluster for s in selections]
+
+
+def forget_clusters(clusters, state=None, path=None):
+    """Record the clusters as forgotten and drop their cached state.
+
+    Returns (ok, message). The state cache is only touched once the forget list
+    has been written, so a failed run leaves everything consistent.
     """
     clusters = validate_clusters(clusters)
-    ok, _ = remote(forget_script(clusters))
-    if not ok:
-        return False, "could not reach rocks to edit the registry; nothing changed"
+    try:
+        record_forgotten(clusters, path)
+    except OSError as exc:
+        return False, "[condor-dashboard] could not write the forget list: {}".format(exc)
 
     if state is not None:
         cached = state.get("clusters", {})
         for cluster in clusters:
             cached.pop(cluster, None)
-    return True, "forgot {}".format(", ".join(clusters))
+    return True, "[condor-dashboard] forgot {}".format(", ".join(clusters))
 
 
 def main(argv=None):
@@ -79,23 +98,35 @@ def main(argv=None):
     if not argv or argv[0] in ("-h", "--help"):
         print(__doc__.strip())
         return 0
-    try:
-        clusters = validate_clusters(argv)
-    except ValueError as exc:
-        print("error: {}".format(exc), file=sys.stderr)
-        return 2
+    forget_all = argv == ["--all"]
+    if not forget_all:
+        try:
+            clusters = validate_clusters(argv)
+        except ValueError as exc:
+            print("[condor-dashboard] error: {}".format(exc), file=sys.stderr)
+            return 2
 
-    # A cluster with jobs still in the queue reappears from condor_q on the next
-    # run, so forgetting it now would achieve nothing. Say so rather than lie.
-    ok, output = generate.run_remote(
-        generate._INVENTORY_SCRIPT % {"registry": generate.REGISTRY_PATH})
-    if ok:
-        queued = set(generate.parse_condor_q(generate._section(output, "QUEUE")))
+    ok, output = generate.run_remote(generate.inventory_script())
+    queued = set(generate.parse_condor_q(generate._section(output, "QUEUE"))) if ok else set()
+
+    if forget_all:
+        if not ok:
+            print("[condor-dashboard] error: could not reach rocks; nothing changed", file=sys.stderr)
+            return 1
+        listed = listed_clusters(output)
+        clusters = sorted((c for c in listed if c not in queued), key=int)
+        running = sorted((c for c in listed if c in queued), key=int)
+        if running:
+            print("[condor-dashboard] still in the queue, kept: {}".format(", ".join(running)))
+        if not clusters:
+            print("[condor-dashboard] nothing to forget")
+            return 0
+    else:
         still_live = [c for c in clusters if c in queued]
         if still_live:
-            print("error: still in the queue, would come straight back: {}".format(
-                ", ".join(still_live)), file=sys.stderr)
-            print("       remove the jobs first (condor_rm) or wait for them to finish.",
+            print("[condor-dashboard] error: still in the queue, forgetting would hide a running job: "
+                  "{}".format(", ".join(still_live)), file=sys.stderr)
+            print("[condor-dashboard]        remove the jobs first (condor_rm) or wait for them to finish.",
                   file=sys.stderr)
             return 3
 
@@ -106,7 +137,6 @@ def main(argv=None):
         return 1
     generate.save_state(state)
 
-    # Regenerate immediately so the pages and copied logs disappear now.
     return generate.main()
 
 
