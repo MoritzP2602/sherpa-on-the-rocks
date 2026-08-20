@@ -1,29 +1,50 @@
 #!/bin/bash
 set -e
 
-SHERPA_INSTALLATION="$1"
-shift
+SHERPA="$1"
+RIVET_ENV="$2"
+shift 2
 
-if [ -z "$SHERPA_INSTALLATION" ]; then
+if [ -z "$SHERPA" ]; then
   echo "ERROR: No SHERPA binary provided as first argument!" >&2
   exit 1
 fi
-SHERPA_INSTALLATION="$(realpath "$SHERPA_INSTALLATION")"
-if [ ! -x "$SHERPA_INSTALLATION" ]; then
-  echo "ERROR: SHERPA binary not found or not executable: $SHERPA_INSTALLATION" >&2
+SHERPA="$(realpath "$SHERPA")"
+if [ ! -x "$SHERPA" ]; then
+  echo "ERROR: SHERPA binary not found or not executable: $SHERPA" >&2
   exit 1
 fi
 
-DIRECTORY="$1"
-LOGDIR="$2"
-CLUSTER="$3"
-PROCESS="$4"
-MAXRUNTIME="${5:-86400}"
+LOGDIR="$1"
+CLUSTER="$2"
+PROCESS="$3"
+MAXRUNTIME="${4:-86400}"
+if [ "$#" -ge 4 ]; then shift 4; else shift "$#"; fi
+
+DIRECTORY="${1:-}"
+INIT_DIR="${2:-}"
+
+if [ -z "$DIRECTORY" ]; then
+  echo "ERROR: No run directory given!" >&2
+  exit 1
+fi
+
+if [ "$RIVET_ENV" = "none" ]; then
+  RIVET_ENV=""
+fi
+if [ -n "$RIVET_ENV" ]; then
+  if [ ! -f "$RIVET_ENV" ]; then
+    echo "ERROR: RIVET_ENV not found: $RIVET_ENV" >&2
+    exit 1
+  fi
+  . "$RIVET_ENV"
+fi
 
 OUTFILE="$TMPDIR/job.${CLUSTER}.${PROCESS}.out"
 ERRFILE="$TMPDIR/job.${CLUSTER}.${PROCESS}.err"
 exec >"$OUTFILE" 2>"$ERRFILE"
 
+mkdir -p "$LOGDIR"
 LOGDIR=$(realpath "$LOGDIR")
 STATUS_LOG="$LOGDIR/overview.${CLUSTER}.log"
 
@@ -59,20 +80,47 @@ cleanup() {
     if cp -f "$TMPDIR/Analysis.yoda.gz" "$OUTDIR/$YODA" 2>/dev/null; then
       echo "Successfully copied Analysis.yoda.gz to $OUTDIR/$YODA"
     else
-      echo "Warning: Failed to copy Analysis.yoda.gz"
+      echo "Warning: Failed to copy Analysis.yoda.gz to $OUTDIR/$YODA"
     fi
   else
-    echo "Warning: Analysis.yoda.gz not found"
+    echo "Warning: Analysis.yoda.gz not found in $TMPDIR"
   fi
 
   if [ -n "$OUTDIR" ] && [ -d "$OUTDIR" ]; then
-    cp *.dat "$OUTDIR" 2>/dev/null || echo "No .dat files found"
+    for item in *.dat *_Histograms; do
+      [ -e "$item" ] || continue
+      if cp -r "$item" "$OUTDIR" 2>/dev/null; then
+        echo "Copied $item to $OUTDIR"
+      else
+        echo "Warning: Failed to copy $item"
+      fi
+    done
   fi
 
   cp -f "$OUTFILE" "$LOGDIR/job.${CLUSTER}.${PROCESS}.out" 2>/dev/null || true
   cp -f "$ERRFILE" "$LOGDIR/job.${CLUSTER}.${PROCESS}.err" 2>/dev/null || true
 }
-trap cleanup EXIT SIGTERM SIGINT SIGQUIT
+term_handler() {
+  echo "Received termination signal. Forwarding SIGINT to Sherpa..."
+
+  if [ -n "$sherpa_pid" ]; then
+    kill -INT "$sherpa_pid" 2>/dev/null
+    wait "$sherpa_pid" 2>/dev/null || true
+  fi
+  last_event=$(get_last_event_count)
+  echo ""
+  print_end_time
+  echo ""
+  echo "Copying output files back to shared filesystem..."
+  {
+    flock -x 200
+    printf "[REMOVED] ${CLUSTER}.${PROCESS} | DIR: %s | EVENTS: %s | Job was removed/terminated externally!\n" "$OUTDIR" "$last_event" >> "$STATUS_LOG"
+  } 200>"$STATUS_LOG.lock"
+  rm -f "$STATUS_LOG.lock"
+  exit 143
+}
+trap cleanup EXIT
+trap term_handler SIGTERM SIGINT SIGQUIT
 
 # Record the start time
 start_epoch=$(date +%s)
@@ -84,8 +132,12 @@ echo ""
 
 INTEGRATION_RESULTS=""
 HAS_RESULTS=false
-
-for d in . ./*; do
+if [ -n "$INIT_DIR" ]; then
+  SEARCH_DIRS="$INIT_DIR"
+else
+  SEARCH_DIRS=". ./*"
+fi
+for d in $SEARCH_DIRS; do
   if [ -d "$d" ] && [ -d "$d/Process" ]; then
     INTEGRATION_RESULTS="$(realpath "$d")"
     if ls "$d"/Results.zip* >/dev/null 2>&1; then
@@ -129,7 +181,7 @@ YODA_BASENAME=$(basename "$DIRECTORY")
 YODA="$YODA_BASENAME.yoda.gz"
 SEED=$(od -An -N4 -tu4 < /dev/urandom | tr -d ' ')
 
-echo "SHERPA_INSTALLATION : $SHERPA_INSTALLATION"
+echo "SHERPA : $SHERPA"
 echo "INTEGRATION_RESULTS : $INTEGRATION_RESULTS"
 echo "YAML                : $YAML"
 echo "YODA                : $YODA"
@@ -183,12 +235,17 @@ cd "$TMPDIR"
 echo "Starting SHERPA..."
 echo ""
 sherpa_start_epoch=$(date +%s)
-timeout -s TERM -k 60 "$TIMEOUT" "$SHERPA_INSTALLATION" -f "$YAML" -R "$SEED" || {
-  exit_code=$?
+
+timeout --foreground -s INT -k 60 "$TIMEOUT" "$SHERPA" -f "$YAML" -R "$SEED" &
+sherpa_pid=$!
+exit_code=0
+wait "$sherpa_pid" || exit_code=$?
+
+if [ $exit_code -ne 0 ]; then
   sherpa_elapsed=$(( $(date +%s) - sherpa_start_epoch ))
   last_event=$(get_last_event_count)
   echo ""
-  if { [ $exit_code -eq 124 ] || [ $exit_code -eq 137 ]; } && [ $sherpa_elapsed -ge $TIMEOUT ]; then
+  if { [ $exit_code -eq 124 ] || [ $exit_code -eq 137 ] || [ $exit_code -eq 130 ]; } && [ $sherpa_elapsed -ge $TIMEOUT ]; then
     echo "SHERPA was terminated after reaching the time limit of $TIMEOUT seconds!"
     echo "This prevents the job from exceeding the wall time limit."
     echo ""
@@ -218,7 +275,8 @@ timeout -s TERM -k 60 "$TIMEOUT" "$SHERPA_INSTALLATION" -f "$YAML" -R "$SEED" ||
     rm -f "$STATUS_LOG.lock"
     exit $exit_code
   fi
-}
+fi
+
 echo ""
 echo "SHERPA completed successfully."
 echo ""

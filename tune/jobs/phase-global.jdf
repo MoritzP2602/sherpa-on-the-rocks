@@ -1,0 +1,14 @@
+# ------------------------------------------------------------------------------ #
+# One job for the whole tune, running the scripts/ script named by               #
+# $(PHASE_SCRIPT). Used by P13 (chi2 and parameter plots).                       #
+# ------------------------------------------------------------------------------ #
+
+Executable     = /bin/bash
+arguments      = $(PHASE_SCRIPT) $(STATE_JSON) $(Cluster) $(Process) $(PHASE_LOG_DIR)
++MaxRuntime    = $(MAXRUNTIME)
+request_cpus   = $(NPROC)
+max_idle       = 1000
+
+Log            = $(PHASE_LOG_DIR)/job.$(Cluster).$(Process).log
+
+Queue

@@ -1,12 +1,13 @@
-Executable  = /bin/bash
+executable  = /bin/bash
 USERNAME    = $ENV(USER)
 LOGDIR      = condor_output
 MAXRUNTIME  = 86400
 SHERPA      = /PATH/TO/SHERPA/INSTALLATION/bin/Sherpa
-Arguments   = /home/$(USERNAME)/sherpa-on-the-rocks/run_sherpa.sh $(SHERPA) $(folder) $(LOGDIR) $(Cluster) $(Process) $(MAXRUNTIME)
+RIVET_ENV   = none
+arguments   = /home/$(USERNAME)/sherpa-on-the-rocks/run_sherpa.sh $(SHERPA) $(RIVET_ENV) $(LOGDIR) $(Cluster) $(Process) $(MAXRUNTIME) $(args)
 +MaxRuntime = $(MAXRUNTIME)
 max_idle    = 1000
 
 Log         = $(LOGDIR)/job.$(Cluster).$(Process).log
 
-Queue folder from runs.txt
+Queue args from runs.txt

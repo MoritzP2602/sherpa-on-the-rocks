@@ -1,0 +1,14 @@
+# ------------------------------------------------------------------------------ #
+# One job per active tuning backend, running the scripts/ script named by        #
+# $(PHASE_SCRIPT). Used by P7 (run_combine_weights.sh).                          #
+# ------------------------------------------------------------------------------ #
+
+Executable     = /bin/bash
+arguments      = $(PHASE_SCRIPT) $(STATE_JSON) $(BACKEND) $(Cluster) $(Process) $(PHASE_LOG_DIR)
++MaxRuntime    = $(MAXRUNTIME)
+request_cpus   = $(NPROC)
+max_idle       = 1000
+
+Log            = $(PHASE_LOG_DIR)/job.$(Cluster).$(Process).log
+
+Queue

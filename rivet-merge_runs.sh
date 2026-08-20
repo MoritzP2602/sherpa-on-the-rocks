@@ -1,5 +1,21 @@
 #!/bin/bash
 
+if [ $# -lt 1 ]; then
+    echo "Usage: $0 [--rm] [--chunked N] [--nmax N] [--quiet] [--gz] [--output|-o DIR] <folder1> [<folder2> ...] [nproc]"
+    echo "  <folder>        : Directory containing subfolders with YODA files."
+    echo "  [nproc]         : Number of parallel jobs (default: 4). Use 1 for sequential processing."
+    echo "  --rm            : (Optional) Remove the subdirectories whose YODA files were merged (subdirs without a YODA, or skipped via --nmax, are kept)."
+    echo "  --chunked N     : (Optional) Merge in chunks of N files (reduces memory usage). Processes nproc chunks in parallel."
+    echo "  --nmax N        : (Optional) Maximum number of yoda files to merge per directory (default: all)."
+    echo "  --quiet|-q      : (Optional) Call rivet-merge with --quiet, supress messages about removed subdirectories."
+    echo "  --gz            : (Optional) Write gzip-compressed output (.yoda.gz)."
+    echo "  --output|-o DIR : (Optional) Output directory for merged files (preserves input structure)."
+    echo "If subdirectories have their own subfolders, merges all .yoda/.yoda.gz files from nested subdirectories into a single .yoda file in each subdirectory."
+    echo "If subdirectories do not have subfolders, merges all .yoda/.yoda.gz files from all subdirectories into a single .yoda file in the parent folder."
+    echo "With --chunked mode: splits files into chunks of N files, processes nproc chunks in parallel, then merges results."
+    exit 1
+fi
+
 REMOVE_SUBDIRS=false
 CHUNK_SIZE=0
 NMAX=-1
@@ -44,22 +60,6 @@ while [ $# -gt 0 ]; do
 done
 
 set -- "${POSITIONAL[@]}"
-
-if [ $# -lt 1 ]; then
-    echo "Usage: $0 [--rm] [--chunked N] [--nmax N] [--quiet] [--gz] [--output|-o DIR] <folder1> [<folder2> ...] [nproc]"
-    echo "  <folder>        : Directory containing subfolders with YODA files."
-    echo "  [nproc]         : Number of parallel jobs (default: 4). Use 1 for sequential processing."
-    echo "  --rm            : (Optional) Remove the subdirectories whose YODA files were merged (subdirs without a YODA, or skipped via --nmax, are kept)."
-    echo "  --chunked N     : (Optional) Merge in chunks of N files (reduces memory usage). Processes nproc chunks in parallel."
-    echo "  --nmax N        : (Optional) Maximum number of yoda files to merge per directory (default: all)."
-    echo "  --quiet|-q      : (Optional) Call rivet-merge with --quiet, supress messages about removed subdirectories."
-    echo "  --gz            : (Optional) Write gzip-compressed output (.yoda.gz)."
-    echo "  --output|-o DIR : (Optional) Output directory for merged files (preserves input structure)."
-    echo "If subdirectories have their own subfolders, merges all .yoda/.yoda.gz files from nested subdirectories into a single .yoda file in each subdirectory."
-    echo "If subdirectories do not have subfolders, merges all .yoda/.yoda.gz files from all subdirectories into a single .yoda file in the parent folder."
-    echo "With --chunked mode: splits files into chunks of N files, processes nproc chunks in parallel, then merges results."
-    exit 1
-fi
 
 is_number() {
     [[ "$1" =~ ^[0-9]+$ ]]

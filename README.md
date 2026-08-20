@@ -45,6 +45,34 @@ SHERPA      = /home/$(USERNAME)/Programs/sherpa/install/bin/Sherpa
 
 If you moved `sherpa-on-the-rocks` to a different location in step 1.1, make sure to additionally update the path to `run_sherpa.sh` in the argument section.
 
+`run_sherpa.sh` is called as:
+
+```
+run_sherpa.sh <SHERPA> <RIVET_ENV> <LOGDIR> <CLUSTER> <PROCESS> [MAXRUNTIME] <DIRECTORY> [INIT_DIR]
+```
+
+Everything up to `MAXRUNTIME` is fixed by the submit file; the trailing
+arguments are one line of `runs.txt`, so what that file contains decides what
+the job is told:
+
+- `DIRECTORY` — the run directory. Relative by default, resolved against the
+  directory you submit from. Use `prepare_runs.sh --absolute` when the jobs do
+  not run from there, as the tuning workflow does.
+- `INIT_DIR` — where the integration results live, added as a second field by
+  `prepare_runs.sh --init`. Without it the job searches `.` and `./*` for a
+  directory containing `Process`.
+
+`RIVET_ENV` names a script to source before SHERPA runs. SHERPA's RPATH already
+resolves everything a **built-in** Rivet analysis needs, so `sherpa.jdf` sets it
+to `none`; point it at your `rivetenv.sh` only if your runcard uses a **custom**
+analysis, which is found through `RIVET_ANALYSIS_PATH`. It must never be left
+empty — HTCondor drops an empty macro from the argument list entirely and every
+later argument shifts one place, which is what `none` avoids.
+
+Whether one failed run stops the submission is not this script's decision: it
+always exits with SHERPA's exit code. The tuning workflow keeps going because
+its DAG post script decides the node's result, see [tune/](tune/).
+
 ### 3. (Optional) Make the scripts executable
 
 You can make the scripts executable to run them without explicitly calling `bash`/`python3`:
@@ -222,6 +250,20 @@ This completes a typical Sherpa production cycle on ROCKS: initialize, split int
 bash ~/sherpa-on-the-rocks/prepare_runs.sh
 bash ~/sherpa-on-the-rocks/yodamerge_runs.sh
 ```
+
+## 6. The other submission systems
+
+Each of these works the same way as the SHERPA submission above: a plain-text job
+list is created first, and HTCondor then runs one job per line of it.
+
+| Directory | Runs | Guide |
+| --- | --- | --- |
+| [merge/](merge/) | `yodamerge_runs.sh` / `rivet-merge_runs.sh` on a node instead of the login node/local PC | [README.md](merge/README.md) |
+| [apprentice/](apprentice/) | `app-build`, `app-tune2` | [build](apprentice/README.app-build.md), [tune](apprentice/README.app-tune2.md) |
+| [professor/](professor/) | `prof2-ipol`, `prof2-tune` | [ipol](professor/README.prof2-ipol.md), [tune](professor/README.prof2-tune.md) |
+
+The fully automatic tuning workflow in [tune/](tune/) chains all of them into one
+HTCondor DAG, driving the same worker scripts rather than copies of them.
 
 ## License
 

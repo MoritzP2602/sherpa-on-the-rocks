@@ -41,9 +41,6 @@ def _tilde(path):
 
 
 # ============================== CONFIGURATION ==============================
-# Every value below is a working default at the institute. Most users change
-# nothing here.
-
 # Your ROCKS username. Only used for the subtitle on the index page. Defaults
 # to the account running this script; set it to a literal string if your ROCKS
 # username differs from your institute one.
@@ -67,6 +64,8 @@ OUT_DIR = os.path.expanduser("~/www/condor")
 
 SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15"]
 STATE_FILE = os.path.expanduser("~/.cache/condor-dashboard/state.json")
+HISTORY_FILE = os.path.expanduser("~/.cache/condor-dashboard/history.csv")
+HISTORY_DAYS = 400
 REGISTRY_PATH = "$HOME/.condor-registry"
 
 FORGOTTEN_FILE = os.path.expanduser("~/.config/condor-dashboard/forgotten")
@@ -83,13 +82,11 @@ ICON_SUFFIXES = (".png", ".svg", ".jpg", ".jpeg", ".webp", ".gif", ".avif")
 
 CLUSTER_DIR = "clusters"
 
-# Shown on each cluster page as click-to-copy commands.
-FORGET_COMMAND = "ssh {} '{}/forget.py {{cluster}}'".format(DASH_HOST, DASH_DIR)
-FORGET_GENERIC_COMMAND = "ssh {} '{}/forget.py CLUSTER_ID'".format(DASH_HOST, DASH_DIR)
-FORGET_ALL_COMMAND = "ssh {} '{}/forget.py --all'".format(DASH_HOST, DASH_DIR)
-REFRESH_COMMAND = "ssh {} '{}/generate.py'".format(DASH_HOST, DASH_DIR)
+FORGET_COMMAND = "{}/forget.py {{cluster}}".format(DASH_DIR)
+FORGET_GENERIC_COMMAND = "{}/forget.py CLUSTER_ID".format(DASH_DIR)
+FORGET_ALL_COMMAND = "{}/forget.py --all".format(DASH_DIR)
+REFRESH_COMMAND = "{}/generate.py".format(DASH_DIR)
 
-# HTCondor JobStatus codes.
 STATUS_IDLE = 1
 STATUS_RUNNING = 2
 STATUS_HELD = 5
@@ -122,6 +119,7 @@ class OverviewSummary:
     ok: int = 0
     failed: int = 0
     timeout: int = 0
+    removed: int = 0
     unparsed: int = 0
     problems: list = field(default_factory=list)
 
@@ -173,9 +171,10 @@ class InventoryItem:
 
 # ---------------------------------------------------------------- parsing
 
-_HEAD = re.compile(r"^\[(COMPLETE|FAILED|TIMEOUT)\]\s+(\d+)\.(\d+)$")
+_HEAD = re.compile(r"^\[(COMPLETE|FAILED|TIMEOUT|REMOVED)\]\s+(\d+)\.(\d+)$")
 _WALL_LIMIT = re.compile(r"Hit wall time limit of\s+(\S+)\s+seconds")
-_COUNTER = {"COMPLETE": "ok", "FAILED": "failed", "TIMEOUT": "timeout"}
+_COUNTER = {"COMPLETE": "ok", "FAILED": "failed", "TIMEOUT": "timeout",
+            "REMOVED": "removed"}
 
 
 def parse_overview_line(line):
@@ -313,8 +312,18 @@ def parse_condor_q(text):
     return queue
 
 
-# Ordered most specific first: the hera/lep entries must win over plain "sherpa".
 JOB_KINDS = [
+    ("run_app-build", "", "Apprentice"),
+    ("app-build", "", "Apprentice"),
+    ("run_app-tune2", "", "Apprentice"),
+    ("app-tune", "", "Apprentice"),
+    ("run_prof2-ipol", "", "Professor"),
+    ("prof2-ipol", "", "Professor"),
+    ("run_prof2-tune", "", "Professor"),
+    ("prof2-tune", "", "Professor"),
+    ("run_merge", "", "Merge"),
+    ("yodamerge", "", "Merge"),
+    ("rivet-merge", "", "Merge"),
     ("run_sherpa", "sherpa.png", "Sherpa"),
     ("sherpa", "sherpa.png", "Sherpa"),
 ]
@@ -402,13 +411,16 @@ def select_clusters(registry, queue, mtimes, now, retention_days=RETENTION_DAYS,
 # ---------------------------------------------------------------- rendering
 
 _CSS = """
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 body{font-family:'Segoe UI',Arial,sans-serif;background:#f6f8fa;color:#222;margin:0;padding:32px 16px}
 .wrap{max-width:1100px;margin:0 auto}
 h1{font-size:1.5em;margin:0 0 4px}
 h2{font-size:1.05em;color:#444;margin:32px 0 10px;font-weight:600}
 .sub{color:#8a949e;font-size:.85em;margin-bottom:8px}
-table{width:100%;background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.07);
-border-collapse:separate;border-spacing:0;overflow:hidden;margin-bottom:8px}
+.scroll{overflow-x:auto}
+.sheet{background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.07);
+margin-bottom:8px}
+table{width:100%;min-width:600px;border-collapse:separate;border-spacing:0}
 th{background:#fff;font-size:.72em;text-transform:uppercase;letter-spacing:.05em;color:#777;
 text-align:left;padding:11px 14px;border-bottom:1px solid #e1e6ea}
 td{padding:10px 14px;border-top:1px solid #eef1f4;font-size:.93em;vertical-align:top}
@@ -434,15 +446,21 @@ border-radius:20px;padding:2px 9px;margin-left:7px;white-space:nowrap}
 .bar{height:4px;background:#eef1f4;border-radius:3px;margin-top:9px;overflow:hidden;max-width:190px}
 .bar span{display:block;height:100%;background:#1b7a43}
 .kicon{height:1.15em;width:auto;vertical-align:-.22em;border-radius:2px}
+.card{background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.07);
+padding:12px 14px 8px;margin-bottom:16px}
+.chart{display:block;width:100%;height:210px}
+.legend{display:flex;gap:16px;flex-wrap:wrap;padding:2px 4px 4px;font-size:.8em;color:#5a6570}
+.lg{display:inline-flex;align-items:center;gap:6px}
+.lg i{width:14px;height:3px;border-radius:2px;display:inline-block}
 /* Label, command and button are grid items, not inline text, so the three line
    up in columns however long an individual label or command is. */
 .cmds{margin-top:26px;display:grid;grid-template-columns:auto auto auto;
 justify-content:start;align-items:center;gap:7px 10px}
 .cmd{display:contents;font-size:.85em;color:#5a6570}
-.cmd code{background:#f1f4f7;padding:3px 7px;border-radius:5px;word-break:break-all}
-.copy{font:inherit;color:#1565c0;background:none;border:1px solid #cfd8e0;
-border-radius:5px;padding:2px 10px;cursor:pointer}
-.copy:hover{background:#f1f4f7}
+.cmd code{background:#dedede;padding:3px 7px;border-radius:5px;word-break:break-all}
+.copy{font:inherit;color:#5a6570;background:none;border:1px solid #cfd8e0;
+border-radius:5px;padding:1.5px 10px;cursor:pointer}
+.copy:hover{background:#dedede}
 """
 
 _STALE_JS = """
@@ -509,7 +527,8 @@ def _badge(selection, prefix=""):
     return f'<span class="kind">{rendered}{" " if rendered else ""}{_esc(label)}</span>'
 
 
-COUNTERS = [("done", "idle"), ("ok", "run"), ("timeout", "warn"), ("failed", "bad")]
+COUNTERS = [("done", "idle"), ("ok", "run"), ("timeout", "warn"),
+            ("removed", "warn"), ("failed", "bad")]
 
 
 def _count(value, css):
@@ -520,9 +539,14 @@ def _count(value, css):
 
 
 def _counts(summary):
-    """All four counters as labelled pills, for use outside a table column."""
+    """Every counter as a labelled pill, for use outside a table column."""
     return " &middot; ".join(f"{_count(getattr(summary, field), css)} {field}"
                              for field, css in COUNTERS)
+
+
+def _table(rows):
+    """A table, in the scroll box that keeps a wide one off the rest of the page."""
+    return '<div class="scroll sheet"><table>' + "".join(rows) + "</table></div>"
 
 
 def _command(label, command):
@@ -540,23 +564,279 @@ def _when(moment):
 
 def _page(title, body, generated_at):
     return (
+        "<!DOCTYPE html>\n"
+        '<meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">\n'
         f"<title>{_esc(title)}</title>\n<style>{_CSS}</style>\n"
         f'<div class="wrap">\n'
         f'<div id="stale" data-generated="{generated_at.isoformat()}"></div>\n'
-        f"{body}\n"
+        f"{body}\n\n"
         f'<p class="sub">Generated {_when(generated_at)}</p>\n'
         f"</div>\n"
         f"<script>{_STALE_JS % {'minutes': STALE_MINUTES}}</script>\n"
     )
 
 
-def render_index(selections, summaries, generated_at, queue_ok=True):
+# ------------------------------------------------------------- load history
+
+DAY_BINS = 96      # 15 minutes each, 00:00 -> 24:00
+WEEK_BINS = 7      # one per weekday, Monday first
+
+
+def parse_sample(text):
+    """Parse the #SAMPLE section into (epoch, total, mine), or None."""
+    for line in text.splitlines():
+        fields = line.strip().split("\t")
+        if len(fields) == 3 and all(f.isdigit() for f in fields):
+            return tuple(int(f) for f in fields)
+    return None
+
+
+def load_history(path=HISTORY_FILE):
+    """Read every recorded sample. Malformed lines are skipped, never fatal."""
+    rows = []
+    try:
+        with open(path) as fh:
+            for line in fh:
+                fields = line.strip().split(",")
+                if len(fields) != 3:
+                    continue
+                try:
+                    rows.append((int(fields[0]), int(fields[1]), int(fields[2])))
+                except ValueError:
+                    continue
+    except OSError:
+        return []
+    return rows
+
+
+def update_history(sample, path=HISTORY_FILE):
+    """Record `sample` and return the full series, pruned to HISTORY_DAYS.
+
+    Appends in the common case; only rewrites the file on the rare refresh where
+    pruning actually drops something.
+    """
+    rows = load_history(path)
+    if sample is None:
+        return rows
+    rows.append(sample)
+    cutoff = sample[0] - HISTORY_DAYS * 86400
+    kept = [r for r in rows if r[0] >= cutoff]
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        if len(kept) != len(rows):
+            atomic_write(path, "".join("%d,%d,%d\n" % r for r in kept))
+        else:
+            with open(path, "a") as fh:
+                fh.write("%d,%d,%d\n" % sample)
+    except OSError:
+        pass
+    return kept
+
+
+def _bin_averages(buckets):
+    """Mean per bin, or None for a bin nothing landed in (drawn as a gap)."""
+    return [round(sum(b) / len(b), 1) if b else None for b in buckets]
+
+
+def _local(epoch):
+    """Samples are binned by local wall-clock time, which is what a reader means
+    by '14:00' or 'Tuesday'."""
+    return datetime.fromtimestamp(epoch)
+
+
+def daily_series(rows, now):
+    """(mine_today, total_today, total_average) over 15-minute bins.
+
+    The average deliberately excludes today: today is still partial, and mixing
+    it in would drag the baseline toward the current moment.
+    """
+    today = _local(now.timestamp()).date()
+    cur_mine = [[] for _ in range(DAY_BINS)]
+    cur_total = [[] for _ in range(DAY_BINS)]
+    past_total = [[] for _ in range(DAY_BINS)]
+    for epoch, total, mine in rows:
+        stamp = _local(epoch)
+        index = (stamp.hour * 60 + stamp.minute) // 15
+        if index >= DAY_BINS:
+            continue
+        if stamp.date() == today:
+            cur_mine[index].append(mine)
+            cur_total[index].append(total)
+        else:
+            past_total[index].append(total)
+    return (_bin_averages(cur_mine), _bin_averages(cur_total),
+            _bin_averages(past_total))
+
+
+def weekly_series(rows, now):
+    """(mine_week, total_week, total_average) over one bin per weekday.
+
+    As with the daily chart the average covers every *other* week, so the
+    current partial week does not skew it.
+    """
+    this_week = _local(now.timestamp()).isocalendar()[:2]
+    cur_mine = [[] for _ in range(WEEK_BINS)]
+    cur_total = [[] for _ in range(WEEK_BINS)]
+    past_total = [[] for _ in range(WEEK_BINS)]
+    for epoch, total, mine in rows:
+        stamp = _local(epoch)
+        index = stamp.weekday()
+        if stamp.isocalendar()[:2] == this_week:
+            cur_mine[index].append(mine)
+            cur_total[index].append(total)
+        else:
+            past_total[index].append(total)
+    return (_bin_averages(cur_mine), _bin_averages(cur_total),
+            _bin_averages(past_total))
+
+
+# ------------------------------------------------------------- load charts
+
+_PLOT_W, _PLOT_H = 1040, 210
+_PLOT_L, _PLOT_R, _PLOT_T, _PLOT_B = 46, 12, 12, 30
+
+MINE_COLOUR = "#1565c0"
+TOTAL_COLOUR = "#EE3333"
+AVG_COLOUR = "#F2A2A2"
+
+
+def _nice_max(values):
+    """A round y-axis maximum comfortably above the data."""
+    peak = max([v for v in values if v is not None] or [0])
+    if peak <= 0:
+        return 1
+    step = 10 ** (len(str(int(peak))) - 1)
+    return int(step * (int(peak / step) + 1))
+
+
+def _series_svg(values, colour, dashed, x_of, y_of):
+    """One series, broken into segments wherever bins have no data.
+
+    A lone sample surrounded by gaps has no line to draw, so it gets a dot --
+    otherwise the very first refresh of the day would render nothing at all.
+    """
+    out, run = [], []
+    dash = ' stroke-dasharray="5 4"' if dashed else ""
+    for index, value in enumerate(values):
+        if value is None:
+            if run:
+                out.append(run)
+                run = []
+        else:
+            run.append((x_of(index), y_of(value)))
+    if run:
+        out.append(run)
+
+    pieces = []
+    for segment in out:
+        if len(segment) == 1:
+            x, y = segment[0]
+            pieces.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="2.4" fill="{colour}"/>')
+        else:
+            points = " ".join(f"{x:.1f},{y:.1f}" for x, y in segment)
+            pieces.append(f'<polyline points="{points}" fill="none" stroke="{colour}" '
+                          f'stroke-width="2" stroke-linejoin="round" '
+                          f'stroke-linecap="round"{dash}/>')
+    return "".join(pieces)
+
+
+def render_chart(series, x_labels, label_every=1):
+    """A small multi-line SVG chart.
+
+    series is [(name, colour, dashed, values)]; every values list must be the
+    same length, one entry per bin, None where there is no data.
+    """
+    bins = len(series[0][3])
+    plot_w = _PLOT_W - _PLOT_L - _PLOT_R
+    plot_h = _PLOT_H - _PLOT_T - _PLOT_B
+    top = _nice_max([v for _, _, _, values in series for v in values])
+
+    step = plot_w / bins
+    def x_of(index):
+        return _PLOT_L + (index + 0.5) * step
+    def y_of(value):
+        return _PLOT_T + plot_h - (value / top) * plot_h
+
+    parts = [f'<svg class="chart" style="min-width:{_PLOT_W}px" '
+             f'viewBox="0 0 {_PLOT_W} {_PLOT_H}" '
+             f'role="img" preserveAspectRatio="none">']
+
+    # horizontal grid + y labels
+    for fraction in (0, 0.5, 1):
+        y = _PLOT_T + plot_h - fraction * plot_h
+        parts.append(f'<line x1="{_PLOT_L}" y1="{y:.1f}" x2="{_PLOT_W - _PLOT_R}" '
+                     f'y2="{y:.1f}" stroke="#e1e6ea" stroke-width="1"/>')
+        parts.append(f'<text x="{_PLOT_L - 8}" y="{y + 4:.1f}" text-anchor="end" '
+                     f'font-size="11" fill="#8a949e">{int(top * fraction)}</text>')
+
+    # x labels
+    for index, label in enumerate(x_labels):
+        if index % label_every:
+            continue
+        parts.append(f'<text x="{x_of(index):.1f}" y="{_PLOT_H - 10}" '
+                     f'text-anchor="middle" font-size="11" fill="#8a949e">'
+                     f'{_esc(label)}</text>')
+
+    for _, colour, dashed, values in series:
+        parts.append(_series_svg(values, colour, dashed, x_of, y_of))
+
+    parts.append("</svg>")
+    legend = "".join(
+        f'<span class="lg"><i style="background:{colour}'
+        f'{";opacity:.55" if dashed else ""}"></i>{_esc(name)}</span>'
+        for name, colour, dashed, _ in series)
+    return (f'<div class="scroll">{"".join(parts)}</div>'
+            f'<div class="legend">{legend}</div>')
+
+
+def render_load_charts(history, now):
+    """The two load charts, or a placeholder until samples exist."""
+    if not history:
+        return ('<h2>Cluster load</h2>'
+                '<p class="none">No samples recorded yet &mdash; the charts appear '
+                'after the first refresh.</p>')
+
+    mine_day, total_day, avg_day = daily_series(history, now)
+    mine_week, total_week, avg_week = weekly_series(history, now)
+
+    hours = [f"{index // 4:02d}:00" if index % 4 == 0 else "" for index in range(DAY_BINS)]
+    days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+    today = _local(now.timestamp())
+    day_note = today.strftime("%A %d %b")
+    year, week, _ = today.isocalendar()
+    week_note = f"week {week}, {year}"
+
+    return "".join([
+        "<h2>Cluster load</h2>",
+        f'<p class="sub">Running jobs today: {_esc(day_note)}, '
+        "15 minute bins. The average covers every earlier day on record.</p>",
+        '<div class="card">',
+        render_chart([("you", MINE_COLOUR, False, mine_day),
+                      ("all users", TOTAL_COLOUR, False, total_day),
+                      ("all users (average)", AVG_COLOUR, True, avg_day)],
+                     hours, label_every=8),
+        "</div>",
+        f'<p class="sub">Running jobs this week: {_esc(week_note)}, '
+        "daily means. The average covers every earlier week on record.</p>",
+        '<div class="card">',
+        render_chart([("you", MINE_COLOUR, False, mine_week),
+                      ("all users", TOTAL_COLOUR, False, total_week),
+                      ("all users (average)", AVG_COLOUR, True, avg_week)],
+                     days),
+        "</div>",
+    ])
+
+
+def render_index(selections, summaries, generated_at, queue_ok=True, history=None):
     """Render the dashboard index."""
     running = [s for s in selections if s.queue and s.queue.total > 0]
     finished = [s for s in selections if not (s.queue and s.queue.total > 0)]
 
-    parts = ["<h1>Condor jobs</h1>",
-             f'<p class="sub">{_esc(USERNAME)} on {_esc(SSH_HOST)}</p>']
+    parts = ["<h1>HTCondor jobs overview</h1>",
+             f'<p class="sub">{_esc(USERNAME)} on {_esc(SSH_HOST)}'
+             f' &middot Generated {_when(generated_at)}</p>\n']
 
     parts.append("<h2>Running now</h2>")
     if not queue_ok:
@@ -569,7 +849,7 @@ def render_index(selections, summaries, generated_at, queue_ok=True):
                   sum(s.queue.idle for s in running),
                   sum(s.queue.held for s in running)]
         parts.append(f'<p class="sub">{totals[0]} running, {totals[1]} idle, {totals[2]} held '
-                     f"across {len(running)} cluster(s)</p>")
+                     f"across {len(running)} cluster(s).</p>")
         rows = ["<tr><th>Cluster</th><th>Name</th><th class='num'>Running</th>"
                 "<th class='num'>Idle</th><th class='num'>Held</th><th>Directory</th></tr>"]
         for sel in running:
@@ -590,7 +870,7 @@ def render_index(selections, summaries, generated_at, queue_ok=True):
             if progress and progress.done:
                 rows.append("<tr class='more'><td></td>"
                             f"<td colspan='5'>so far {_counts(progress)}</td></tr>")
-        parts.append("<table>" + "".join(rows) + "</table>")
+        parts.append(_table(rows))
 
     heading = "Finished" if queue_ok else "Recent"
     parts.append(f"<h2>{heading} (last {RETENTION_DAYS} days)</h2>")
@@ -598,16 +878,19 @@ def render_index(selections, summaries, generated_at, queue_ok=True):
         parts.append('<p class="none">Nothing finished in the last '
                      f"{RETENTION_DAYS} days.</p>")
     else:
+        entry = "entry" if len(finished) == 1 else "entries"
+        parts.append(f'<p class="sub">{len(finished)} {entry} in the history.</p>')
         rows = ["<tr><th>Cluster</th><th>Name</th><th class='num'>Done</th>"
                 "<th class='num'>OK</th><th class='num'>Timeout</th>"
-                "<th class='num'>Failed</th><th>Submitted</th><th>Directory</th></tr>"]
+                "<th class='num'>Removed</th><th class='num'>Failed</th>"
+                "<th>Submitted</th><th>Directory</th></tr>"]
         for sel in finished:
             summary = summaries.get(sel.cluster)
             name = _esc(_name(sel))
             badge = _badge(sel)
             if summary is None:
                 cells = (f"<td>{name}{badge}</td>"
-                         f"<td colspan='4' class='none'>no overview file</td>")
+                         f"<td colspan='{len(COUNTERS)}' class='none'>no overview file</td>")
             else:
                 link = (f"<a href='{CLUSTER_DIR}/{_esc(sel.cluster)}.html'>{name}</a>"
                         f"{badge}")
@@ -619,7 +902,7 @@ def render_index(selections, summaries, generated_at, queue_ok=True):
             rows.append(f"<tr><td>{_esc(sel.cluster)}</td>{cells}"
                         f"<td>{_when(sel.timestamp)}</td>"
                         f"<td class='path'>{_esc(sel.submit_dir)}</td></tr>")
-        parts.append("<table>" + "".join(rows) + "</table>")
+        parts.append(_table(rows))
 
     parts.append(
         '<div class="cmds">'
@@ -629,7 +912,9 @@ def render_index(selections, summaries, generated_at, queue_ok=True):
         + "</div>"
     )
 
-    return _page("Condor jobs", "\n".join(parts), generated_at)
+    parts.append(render_load_charts(history or [], generated_at))
+
+    return _page("HTCondor jobs overview", "\n".join(parts), generated_at)
 
 
 def render_cluster(selection, summary, log_name, generated_at):
@@ -641,7 +926,7 @@ def render_cluster(selection, summary, log_name, generated_at):
         f"submitted {_when(selection.timestamp)}</p>",
         f'<p class="path">{_esc(selection.submit_dir)}</p>',
         '<p class="sub">' + _counts(summary)
-        + (f" &middot; {summary.unparsed} unparsed" if summary.unparsed else "")
+        + (f" &middot; <span class='pill idle'>{summary.unparsed}</span> unparsed" if summary.unparsed else "")
         + f' &middot; <a href="{_esc(log_name)}">raw {_esc(log_name)}</a></p>',
     ]
 
@@ -653,15 +938,18 @@ def render_cluster(selection, summary, log_name, generated_at):
                 "<th>Detail</th><th>Directory</th></tr>"]
         for entry in summary.problems:
             css = "bad" if entry.status == "FAILED" else "warn"
-            detail = (f"exit {_esc(entry.detail)}" if entry.status == "FAILED"
-                      else f"wall limit {_esc(entry.detail)}s")
+            if entry.status == "TIMEOUT":
+                detail = f"wall limit {_esc(entry.detail)}s"
+            elif entry.status == "FAILED":
+                detail = f"exit {_esc(entry.detail)}"
+            else: detail = _esc("")
             rows.append(
                 f"<tr><td>{_esc(entry.cluster)}.{_esc(entry.proc)}</td>"
                 f"<td><span class='pill {css}'>{_esc(entry.status)}</span></td>"
                 f"<td class='num'>{_esc(entry.events)}</td><td>{detail}</td>"
                 f"<td class='path'>{_esc(entry.dir)}</td></tr>"
             )
-        parts.append("<table>" + "".join(rows) + "</table>")
+        parts.append(_table(rows))
 
     forget = FORGET_COMMAND.format(cluster=selection.cluster)
     parts.append('<div class="cmds">'
@@ -671,9 +959,11 @@ def render_cluster(selection, summary, log_name, generated_at):
     return _page(f"Cluster {selection.cluster}", "\n".join(parts), generated_at)
 
 
-def build_pages(selections, summaries, raw_logs, generated_at, queue_ok=True):
+def build_pages(selections, summaries, raw_logs, generated_at, queue_ok=True,
+                history=None):
     """Produce {filename: content} for everything that should be written."""
-    pages = {"index.html": render_index(selections, summaries, generated_at, queue_ok)}
+    pages = {"index.html": render_index(selections, summaries, generated_at, queue_ok,
+                                        history)}
     for sel in selections:
         summary = summaries.get(sel.cluster)
         if summary is None:
@@ -739,6 +1029,10 @@ if [ -n "$Q" ]; then printf '%%s\n' "$Q"; fi
 echo "#REGISTRY"
 R=$(cat "$REG" 2>/dev/null || true)
 if [ -n "$R" ]; then printf '%%s\n' "$R"; fi
+echo "#SAMPLE"
+printf '%%s\t%%s\t%%s\n' "$(date +%%s)" \
+  "$(condor_q -all -constraint 'JobStatus==2' -af ClusterId 2>/dev/null | wc -l)" \
+  "$(condor_q      -constraint 'JobStatus==2' -af ClusterId 2>/dev/null | wc -l)"
 echo "#LOGS"
 {
   if [ -n "$R" ]; then
@@ -750,7 +1044,11 @@ echo "#LOGS"
 } | sort -u | while IFS=$'\t' read -r cid dir; do
   [ -n "${cid:-}" ] || continue
   f="$dir/condor_output/overview.$cid.log"
-  if [ -f "$f" ]; then printf '%%s\t%%s\t%%s\n' "$cid" "$(stat -c %%Y "$f")" "$f"; fi
+  # The tune workflow nests its logs one level deeper, under the DAG node name.
+  if [ ! -f "$f" ]; then
+    f=$(ls "$dir"/condor_output/*/overview."$cid".log 2>/dev/null | head -n1)
+  fi
+  if [ -n "${f:-}" ] && [ -f "$f" ]; then printf '%%s\t%%s\t%%s\n' "$cid" "$(stat -c %%Y "$f")" "$f"; fi
 done
 echo "#END"
 """
@@ -788,7 +1086,7 @@ def _section(text, name):
         return ""
     out = []
     for line in lines[start:]:
-        if line.startswith("#") and line[1:] in ("QUEUE", "REGISTRY", "LOGS", "END"):
+        if line.startswith("#") and line[1:] in ("QUEUE", "REGISTRY", "SAMPLE", "LOGS", "END"):
             break
         out.append(line)
     return "\n".join(out)
@@ -828,7 +1126,8 @@ def save_state(state, path=STATE_FILE):
 def summary_to_dict(summary):
     return {
         "done": summary.done, "ok": summary.ok, "failed": summary.failed,
-        "timeout": summary.timeout, "unparsed": summary.unparsed,
+        "timeout": summary.timeout, "removed": summary.removed,
+        "unparsed": summary.unparsed,
         "problems": [[p.status, p.cluster, p.proc, p.dir, p.events, p.detail]
                      for p in summary.problems],
     }
@@ -837,7 +1136,8 @@ def summary_to_dict(summary):
 def summary_from_dict(data):
     summary = OverviewSummary(
         done=data.get("done", 0), ok=data.get("ok", 0), failed=data.get("failed", 0),
-        timeout=data.get("timeout", 0), unparsed=data.get("unparsed", 0),
+        timeout=data.get("timeout", 0), removed=data.get("removed", 0),
+        unparsed=data.get("unparsed", 0),
     )
     summary.problems = [Entry(*p) for p in data.get("problems", [])]
     return summary
@@ -854,6 +1154,7 @@ def main():
     ok, output = run_remote(inventory_script())
 
     if ok:
+        history = update_history(parse_sample(_section(output, "SAMPLE")))
         queue = parse_condor_q(_section(output, "QUEUE"))
         registry = parse_registry(_section(output, "REGISTRY"))
         forgotten = load_forgotten()
@@ -896,6 +1197,8 @@ def main():
             del clusters[gone]
     else:
         # Cluster unreachable: re-render from cache rather than reporting zero.
+        # No new sample, but the existing history is still worth drawing.
+        history = load_history()
         selections, summaries, raw_logs = [], {}, {}
         for cluster, record in clusters.items():
             stamp = record.get("timestamp")
@@ -907,7 +1210,8 @@ def main():
                 summaries[cluster] = summary_from_dict(record["summary"])
         selections.sort(key=lambda s: (s.timestamp is not None, s.timestamp), reverse=True)
 
-    pages = build_pages(selections, summaries, raw_logs, now, queue_ok=ok)
+    pages = build_pages(selections, summaries, raw_logs, now, queue_ok=ok,
+                        history=history)
     for name, content in pages.items():
         atomic_write(os.path.join(OUT_DIR, name), content)
 

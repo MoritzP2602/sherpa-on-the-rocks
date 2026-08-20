@@ -1,0 +1,16 @@
+# ------------------------------------------------------------------------------ #
+# One job per line of $(JOBLIST), for the multi-core workers that are handed a   #
+# process count. Used by P3/P12 (merge/run_merge.sh) and P5/P8                   #
+# (apprentice/run_app-build.sh, professor/run_prof2-ipol.sh).                    #
+# ------------------------------------------------------------------------------ #
+
+Executable     = /bin/bash
+arguments      = $(WORKER) $(BINARY) $(RIVET_ENV) $(NPROC) $(PHASE_LOG_DIR) $(Cluster) $(Process) $(MAXRUNTIME) $(args)
+environment    = "$(JOB_ENV)"
++MaxRuntime    = $(MAXRUNTIME)
+request_cpus   = $(NPROC)
+max_idle       = 1000
+
+Log            = $(PHASE_LOG_DIR)/job.$(Cluster).$(Process).log
+
+Queue args from $(JOBLIST)

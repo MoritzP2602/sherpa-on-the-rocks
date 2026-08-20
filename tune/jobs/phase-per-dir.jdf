@@ -1,0 +1,15 @@
+# ------------------------------------------------------------------------------ #
+# One job per input directory, running the scripts/ script named by              #
+# $(PHASE_SCRIPT). Used by P1 (run_tuning_grid.sh), P4                           #
+# (run_split_reweighting.sh) and P10 (run_validation_grid.sh).                   #
+# ------------------------------------------------------------------------------ #
+
+Executable     = /bin/bash
+arguments      = $(PHASE_SCRIPT) $(STATE_JSON) $(DIR_INDEX) $(Cluster) $(Process) $(PHASE_LOG_DIR)
++MaxRuntime    = $(MAXRUNTIME)
+request_cpus   = $(NPROC)
+max_idle       = 1000
+
+Log            = $(PHASE_LOG_DIR)/job.$(Cluster).$(Process).log
+
+Queue

@@ -4,8 +4,15 @@ This directory generates a static overview of your HTCondor jobs and publishes i
 on your institute webpage, so you can check on a production run from anywhere
 without logging into the cluster.
 
-It reads the `overview.<cluster>.log` files written by `run_sherpa.sh`, so it
-only reports on jobs submitted with the scripts in this repository.
+It reads the `overview.<cluster>.log` files written by the worker scripts of the
+submission systems in this repository — `run_sherpa.sh`, `merge/run_merge.sh`
+and the `apprentice/` and `professor/` workers — so it only reports on jobs
+submitted with them. Each cluster is badged by the tool it ran: `Sherpa`,
+`Merge`, `Apprentice` or `Professor`.
+
+Runs of the automatic tuning workflow in `tune/` are included: it drives those
+same workers, and nests their logs one level deeper, under
+`condor_output/<DAG node>/`, which the probe also looks in.
 
 Nothing runs on the cluster. A timer on an always-on institute host (`ds9`) polls
 ROCKS over SSH every five minutes and writes plain HTML into your webspace.

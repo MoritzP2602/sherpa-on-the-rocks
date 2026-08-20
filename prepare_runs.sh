@@ -1,10 +1,34 @@
 #!/bin/bash
 
+if [ $# -lt 1 ]; then
+    echo "Usage: $0 [-o outfile] [--add] [--dry] [--exact-name] [--depth N] <folder1> [nsubfolders1] [<folder2> [nsubfolders2] ...]"
+    echo "  <folder>      : Directory in which to create or list subfolders."
+    echo "  [nsubfolders] : (Optional) Number of subfolders to create in each directory."
+    echo "  -o outfile    : (Optional) Output filename (default: runs.txt)."
+    echo "  --add         : (Optional) Append to existing outfile instead of overwriting."
+    echo "  --dry         : (Optional) Show what would be created/listed without doing it."
+    echo "  --exact-name  : Skip only directories with <dirname>.yoda or <dirname>.yoda.gz (default: skip directories with any .yoda/.yoda.gz file)."
+    echo "  --depth|-d N  : Creation depth relative to each folder (default: 1)."
+    echo "  --absolute    : Write absolute run directory paths instead of paths relative to the"
+    echo "                  current directory."
+    echo "  --init[=PATH] : Append the integration results directory to every line as a second"
+    echo "                  field, so the job is told where to find it instead of searching."
+    echo "                  Bare --init uses ./init; use --init=PATH for anywhere else."
+    echo "  --quiet|-q    : Suppress messages about skipped and created subdirectories."
+    echo "If nsubfolders is given and folder has subdirectories, creates subfolders in each and lists them in $OUTFILE."
+    echo "If nsubfolders is given and folder has no subdirectories, creates subfolders directly in folder and lists them in $OUTFILE."
+    echo "If nsubfolders is not given, lists all subdirectories of folder in $OUTFILE."
+    exit 1
+fi
+
 OUTFILE="runs.txt"
 APPEND=false
+DRY=false
 EXACT_NAME=false
 DEPTH=1
 QUIET=false
+ABSOLUTE=false
+INIT_DIR=""
 POSITIONAL=()
 
 while [ $# -gt 0 ]; do
@@ -15,6 +39,8 @@ while [ $# -gt 0 ]; do
             OUTFILE="$1"; shift ;;
         --add)
             APPEND=true; shift ;;
+        --dry)
+            DRY=true; shift ;;
         --exact-name)
             EXACT_NAME=true
             shift ;;
@@ -29,35 +55,54 @@ while [ $# -gt 0 ]; do
         -q|--quiet)
             QUIET=true
             shift ;;
+        --absolute)
+            ABSOLUTE=true; shift ;;
+        --init)
+            INIT_DIR="init"; shift ;;
+        --init=*)
+            INIT_DIR="${1#*=}"
+            if [ -z "$INIT_DIR" ]; then echo "--init= requires a path" >&2; exit 1; fi
+            shift ;;
         *) POSITIONAL+=("$1"); shift ;;
     esac
 done
 
 set -- "${POSITIONAL[@]}"
 
+if [ -n "$INIT_DIR" ]; then
+    if [ ! -d "$INIT_DIR" ]; then
+        echo "ERROR: Integration results directory not found: $INIT_DIR" >&2
+        exit 1
+    fi
+    # Always absolute: the second field is read by a job that may run anywhere.
+    INIT_DIR=$(realpath "$INIT_DIR")
+fi
+
 initial_runs=0
 if [ "$APPEND" = true ] && [ -f "$OUTFILE" ]; then
     initial_runs=$(wc -l < "$OUTFILE")
 fi
 
-if [ $# -lt 1 ]; then
-    echo "Usage: $0 [-o outfile] [--add] [--exact-name] [--depth N] <folder1> [nsubfolders1] [<folder2> [nsubfolders2] ...]"
-    echo "  <folder>      : Directory in which to create or list subfolders."
-    echo "  [nsubfolders] : (Optional) Number of subfolders to create in each directory."
-    echo "  -o outfile    : (Optional) Output filename (default: runs.txt)."
-    echo "  --add         : (Optional) Append to existing outfile instead of overwriting."
-    echo "  --exact-name  : Skip only directories with <dirname>.yoda or <dirname>.yoda.gz (default: skip directories with any .yoda/.yoda.gz file)."
-    echo "  --depth|-d N  : Creation depth relative to each folder (default: 1)."
-    echo "  --quiet|-q    : Suppress messages about skipped and created subdirectories."
-    echo "If nsubfolders is given and folder has subdirectories, creates subfolders in each and lists them in $OUTFILE."
-    echo "If nsubfolders is given and folder has no subdirectories, creates subfolders directly in folder and lists them in $OUTFILE."
-    echo "If nsubfolders is not given, lists all subdirectories of folder in $OUTFILE."
-    exit 1
-fi
-
-if [ "$APPEND" = false ] && [ -f "$OUTFILE" ]; then
+if [ "$DRY" = false ] && [ "$APPEND" = false ] && [ -f "$OUTFILE" ]; then
     rm "$OUTFILE"
 fi
+
+if [ "$DRY" = false ]; then
+    mkdir -p condor_output
+fi
+
+dry_count=0
+emit_run() {
+    local line="$1"
+    if [ -n "$INIT_DIR" ]; then
+        line="$line $INIT_DIR"
+    fi
+    if [ "$DRY" = true ]; then
+        dry_count=$((dry_count + 1))
+    else
+        printf '%s\n' "$line" >> "$OUTFILE"
+    fi
+}
 
 is_number() {
     [[ "$1" =~ ^[0-9]+$ ]]
@@ -68,6 +113,10 @@ to_output_path() {
     local rel
 
     abs=$(realpath -m "$1")
+    if [ "$ABSOLUTE" = true ]; then
+        printf '%s\n' "$abs"
+        return
+    fi
     rel=$(realpath --relative-to="$PWD" "$abs" 2>/dev/null)
     if [ -n "$rel" ]; then
         printf '%s\n' "$rel"
@@ -163,7 +212,7 @@ process_folder() {
                         [ "$QUIET" = false ] && echo "Skipping $subdir (matching YODA found)"
                         continue
                     fi
-                    echo "$(to_output_path "$subdir")" >> "$OUTFILE"
+                    emit_run "$(to_output_path "$subdir")"
                     listed_in_dir=$((listed_in_dir + 1))
                     listed_total=$((listed_total + 1))
                     listed_nested_total=$((listed_nested_total + 1))
@@ -183,7 +232,7 @@ process_folder() {
                     continue
                 fi
 
-                echo "$(to_output_path "$dir")" >> "$OUTFILE"
+                emit_run "$(to_output_path "$dir")"
                 listed_total=$((listed_total + 1))
                 listed_direct_total=$((listed_direct_total + 1))
                 echo "Listed $dir"
@@ -214,7 +263,11 @@ process_folder() {
             return 0
         fi
 
-        echo "Creating $n subdirectories for targets at depth $DEPTH in $PREFIX..."
+        if [ "$DRY" = true ]; then
+            echo "Would create $n subdirectories for targets at depth $DEPTH in $PREFIX..."
+        else
+            echo "Creating $n subdirectories for targets at depth $DEPTH in $PREFIX..."
+        fi
         for dir in "${target_dirs[@]}"; do
             [ -d "$dir" ] || continue
 
@@ -233,19 +286,27 @@ process_folder() {
                 continue
             fi
 
-            echo "Creating $n subdirectories in $dir..."
+            if [ "$DRY" = true ]; then
+                echo "Would create $n subdirectories in $dir..."
+            else
+                echo "Creating $n subdirectories in $dir..."
+            fi
             for ((j=0; j<n; j++)); do
                 sub_dir=$(printf "%s/%0${width}d" "$dir" "$j")
                 if [ -d "$sub_dir" ]; then
                     echo "Skipping existing: $sub_dir"
                 else
-                    if ! mkdir "$sub_dir"; then
-                        echo "ERROR: Failed to create $sub_dir" >&2
-                        exit 1
+                    if [ "$DRY" = true ]; then
+                        [ "$QUIET" = false ] && echo "Would create: $sub_dir"
+                    else
+                        if ! mkdir "$sub_dir"; then
+                            echo "ERROR: Failed to create $sub_dir" >&2
+                            exit 1
+                        fi
+                        [ "$QUIET" = false ] && echo "Created: $sub_dir"
                     fi
-                    [ "$QUIET" = false ] && echo "Created: $sub_dir"
                 fi
-                echo "$(to_output_path "$sub_dir")" >> "$OUTFILE"
+                emit_run "$(to_output_path "$sub_dir")"
             done
         done
     fi
@@ -269,7 +330,13 @@ while [ $i -le $# ]; do
     fi
 done
 
-if [ -f "$OUTFILE" ]; then
+if [ "$DRY" = true ]; then
+    echo "Dry run: nothing was created, and nothing was written to $OUTFILE."
+    echo "Total number of runs: $dry_count"
+    echo ""
+    echo "Submit with:"
+    echo "  condor_submit ~/sherpa-on-the-rocks/sherpa.jdf"
+elif [ -f "$OUTFILE" ]; then
     echo "Done! Results written to $OUTFILE."
     total_runs=$(wc -l < "$OUTFILE")
     if [ "$APPEND" = true ]; then
@@ -280,6 +347,9 @@ if [ -f "$OUTFILE" ]; then
         echo "Added $added_runs runs."
     fi
     echo "Total number of runs: $total_runs"
+    echo ""
+    echo "Submit with:"
+    echo "  condor_submit ~/sherpa-on-the-rocks/sherpa.jdf"
 else
     echo "No $OUTFILE found, all directories were skipped."
 fi

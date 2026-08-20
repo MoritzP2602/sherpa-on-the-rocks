@@ -1,0 +1,16 @@
+# ------------------------------------------------------------------------------ #
+# One job per line of $(JOBLIST), for the single-process workers, which take no  #
+# process count. Used by P2/P11 (run_sherpa.sh) and by P6/P9                     #
+# (apprentice/run_app-tune2.sh, professor/run_prof2-tune.sh).                    #
+# ------------------------------------------------------------------------------ #
+
+Executable     = /bin/bash
+arguments      = $(WORKER) $(BINARY) $(RIVET_ENV) $(PHASE_LOG_DIR) $(Cluster) $(Process) $(MAXRUNTIME) $(args)
+environment    = "$(JOB_ENV)"
++MaxRuntime    = $(MAXRUNTIME)
+request_cpus   = $(NPROC)
+max_idle       = 1000
+
+Log            = $(PHASE_LOG_DIR)/job.$(Cluster).$(Process).log
+
+Queue args from $(JOBLIST)

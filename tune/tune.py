@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
+"""Submit the whole tuning procedure to HTCondor as one DAG."""
+
+from __future__ import annotations
+
 import argparse
 import functools
 import json
-import math
 import os
 import re
 import shutil
 import subprocess
-from datetime import datetime
+import sys
 from pathlib import Path
 
 try:
@@ -15,129 +18,29 @@ try:
 except ImportError as e:
     raise SystemExit("PyYAML is required. Install with: pip install pyyaml") from e
 
-EVENT_RE = re.compile(r"^\s*([0-9]+(?:\.[0-9]+)?)\s*([kKmMgG]?)\s*$")
-TEMPLATE_EVENTS_RE = re.compile(r"^\s*EVENTS\s*:\s*(.+?)\s*$")
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+
+import phases
+import resume as resume_module
+import runcard
 
 
-def parse_event_value(value: str) -> int:
-    raw = str(value).strip()
-    m = EVENT_RE.match(raw)
-    if not m:
-        raise ValueError(f"Invalid event value '{value}'. Use forms like 500k, 20M, 1G.")
-    num = float(m.group(1))
-    suffix = m.group(2).upper()
-    factor = 1
-    if suffix == "K":
-        factor = 10**3
-    elif suffix == "M":
-        factor = 10**6
-    elif suffix == "G":
-        factor = 10**9
-    return int(math.ceil(num * factor))
+# --------------------------------------------------------------------------- #
+# Printing
+# --------------------------------------------------------------------------- #
 
-def parse_template_events(template_path: Path) -> int:
-    for line in template_path.read_text(encoding="utf-8").splitlines():
-        m = TEMPLATE_EVENTS_RE.match(line)
-        if not m:
-            continue
-        value = m.group(1).split("#", 1)[0].strip().strip('"').strip("'")
-        return parse_event_value(value)
-    raise ValueError(f"Could not find EVENTS: in {template_path}")
-
-
-def ensure_required_inputs(input_dir: Path, *, require_parameter: bool, require_nominal: bool,
-                           require_data: bool) -> None:
-    required_files = ["template.yaml", "weights.txt"]
-    if require_data:
-        required_files.append("data.json")
-    if require_parameter:
-        required_files.append("parameter.json")
-    for fname in required_files:
-        path = input_dir / fname
-        if not path.exists():
-            raise FileNotFoundError(f"Missing required file: {path}")
-    if require_nominal:
-        nominal_path = input_dir / "nominal.json"
-        if not nominal_path.exists():
-            raise FileNotFoundError(f"Missing required file: {nominal_path}")
-    init_dir = input_dir / "init"
-    if not init_dir.is_dir():
-        raise FileNotFoundError(f"Missing required directory: {init_dir}")
-
-
-def stack_json_values(left, right):
-    if isinstance(left, list) and isinstance(right, list):
-        return left + right
-    if isinstance(left, dict) and isinstance(right, dict):
-        merged = dict(left)
-        for key, value in right.items():
-            if key in merged:
-                merged[key] = stack_json_values(merged[key], value)
-            else:
-                merged[key] = value
-        return merged
-    if left == right:
-        return left
-    return [left, right]
-
-
-def warn_refdata_overlap(datasets: list) -> None:
-    bin_owners: dict[str, list[int]] = {}
-    for idx, data in enumerate(datasets, start=1):
-        if not isinstance(data, dict):
-            continue
-        for binid in data:
-            bin_owners.setdefault(str(binid), []).append(idx)
-    overlaps: dict[tuple[str, tuple[int, ...]], int] = {}
-    for binid, owners in bin_owners.items():
-        if len(owners) < 2:
-            continue
-        histname = binid.rsplit("#", 1)[0]
-        key = (histname, tuple(owners))
-        overlaps[key] = overlaps.get(key, 0) + 1
-    if not overlaps:
+def table(rows, indent: str = "    ") -> None:
+    """A left-aligned '- key : value' block, skipping rows with no value."""
+    rows = [(key, value) for key, value in rows if value is not None]
+    if not rows:
         return
-    print()
-    print("WARNING: reference data overlap in combined data.json:")
-    for (histname, owners), n_bins in sorted(overlaps.items()):
-        dirs = ", ".join(f"INPUT_DIR{i}" for i in owners)
-        print(f"  {histname} ({n_bins} bin{'s' if n_bins != 1 else ''}) present in {dirs}")
-    print()
+    width = max(len(key) for key, _ in rows)
+    for key, value in rows:
+        print(f"{indent}- {key:<{width}} : {value}")
 
 
-def write_stacked_json_values(input_dirs: list[Path], merged_dir: Path) -> None:
-    if len(input_dirs) < 2:
-        return
-    target_path = merged_dir / "data.json"
-
-    datasets = [json.loads((idir / "data.json").read_text(encoding="utf-8"))
-                for idir in input_dirs]
-    warn_refdata_overlap(datasets)
-    stacked = functools.reduce(stack_json_values, datasets)
-    target_path.write_text(json.dumps(stacked, indent=2), encoding="utf-8")
-
-
-def get_phase_overview(state):
-    n_dirs = len(state["input_dirs"])
-    split_suffix = " (one subjob per backend and order)" if state.get("split_tuning_procedure") else ""
-    phases = []
-    phases.extend([
-                ("P1", "Create tuning grid and prepare Sherpa subruns"),
-                ("P2", "Sherpa event generation for tuning grid"),
-                ("P3", "Merge results of Sherpa subruns using yodamerge/rivet-merge"),
-                ("P4", "Build surrogate model and optimize parameters" + split_suffix),
-                  ])
-    if n_dirs == 1:
-        phases.append(("P5", "SKIPPED"))
-    else:
-        phases.append(("P5", "Combine results from different processes and repeat tuning" + split_suffix))
-    phases.extend([
-                ("P6", "Create validation grid from tune results and prepare subruns"),
-                ("P7", "Sherpa event generation for validation grid"),
-                ("P8", "Merge validation results using yodamerge/rivet-merge"),
-                  ])
-    phases.append(("P9", "Compute and plot chi-squared values"))
-    return phases
+def ask(prompt: str) -> bool:
+    return input(prompt).strip().lower() in {"y", "yes"}
 
 
 def check_mpi_module_available(module_name: str) -> bool:
@@ -146,801 +49,261 @@ def check_mpi_module_available(module_name: str) -> bool:
               'command -v module >/dev/null 2>&1 || exit 1; '
               'module load "$1" >/dev/null 2>&1')
     try:
-        r = subprocess.run(["bash", "-c", script, "_", module_name], capture_output=True, timeout=10)
+        r = subprocess.run(["bash", "-c", script, "_", module_name],
+                           capture_output=True, timeout=10)
         return r.returncode == 0
-    except Exception: return False
-
-
-def get_n_parameters(parameter_json_path: Path) -> int:
-    data = json.loads(parameter_json_path.read_text(encoding="utf-8"))
-    if isinstance(data, dict):
-        if "parameters" in data:
-            p = data["parameters"]
-            if isinstance(p, dict):
-                return len(p)
-            if isinstance(p, list):
-                return len(p)
-        return len(data)
-    if isinstance(data, list):
-        return len(data)
-    raise ValueError(f"Could not obtain number of parameters from {parameter_json_path}")
-
-def get_required_cfg_value(cfg, *keys):
-    for key in keys:
-        if key in cfg and str(cfg[key]).strip():
-            return cfg[key]
-    raise KeyError(f"Missing required key: one of {', '.join(keys)}")
-
-def resolve_cfg_path(value, config_path: Path) -> Path:
-    p = Path(os.path.expanduser(str(value)))
-    if p.is_absolute():
-        return p.resolve()
-    return (config_path.parent / p).resolve()
-
-
-def parse_on_off(value, key: str) -> bool:
-    if isinstance(value, bool):
-        return value
-    raw = str(value).strip().lower()
-    if raw in {"on", "true"}:
-        return True
-    if raw in {"off", "false"}:
+    except Exception:
         return False
-    raise ValueError(f"{key} entries must be one of: on/off/true/false, got '{value}'")
-
-def parse_apprentice_order(value: str) -> tuple[int, int]:
-    parts = [x.strip() for x in str(value).split(",")]
-    if len(parts) != 2:
-        raise ValueError("APPRENTICE.ORDER must have exactly two comma-separated integers, e.g. '2,1' "
-                         "(in a list, quote each entry, e.g. ORDER: [\"2,0\", \"3,0\"])")
-    try:
-        k_p = int(parts[0])
-        k_q = int(parts[1])
-    except ValueError as e:
-        raise ValueError("APPRENTICE.ORDER must contain integers, e.g. '2,1'") from e
-    if k_p < 0 or k_q < 0:
-        raise ValueError("APPRENTICE.ORDER entries must be >= 0")
-    return k_p, k_q
-
-def parse_professor_order(value: str) -> int:
-    raw = str(value).strip()
-    if "," in raw or len(raw.split()) != 1:
-        raise ValueError("PROFESSOR.ORDER must be a single integer, e.g. '2'")
-    try:
-        k = int(raw)
-    except ValueError as e:
-        raise ValueError("PROFESSOR.ORDER must be a single integer, e.g. '2'") from e
-    if k < 0:
-        raise ValueError("PROFESSOR.ORDER must be >= 0")
-    return k
-
-def parse_order_list(value, key: str, parse_single, canonicalize) -> list[str]:
-    items = value if isinstance(value, list) else [value]
-    if not items:
-        raise KeyError(f"Missing required key: {key}")
-    orders = []
-    for item in items:
-        raw = str(item).strip()
-        if not raw:
-            raise ValueError(f"{key} entries must be non-empty")
-        orders.append(canonicalize(parse_single(raw)))
-    if len(set(orders)) != len(orders):
-        raise ValueError(f"{key} contains duplicate orders: {orders}")
-    return orders
-
-def parse_backend_options(block: dict, key: str) -> str:
-    value = block.get(key)
-    if value is None:
-        return ""
-    return str(value).strip()
-
-def parse_input_dir_blocks(cfg, config_path: Path):
-    indices = sorted(int(m.group(1)) for key in cfg
-                     if (m := re.fullmatch(r"INPUT_DIR(\d+)", str(key))))
-    if not indices:
-        raise KeyError("Missing required key: INPUT_DIR1")
-    if indices[0] < 1:
-        raise KeyError(f"INPUT_DIR numbering starts at 1, got INPUT_DIR{indices[0]}")
-    expected = list(range(1, len(indices) + 1))
-    if indices != expected:
-        missing = next(i for i in expected if i not in indices)
-        raise KeyError(f"INPUT_DIR keys must be numbered contiguously from 1: "
-                       f"found INPUT_DIR{max(indices)} but INPUT_DIR{missing} is missing")
-    blocks = []
-    for idx in indices:
-        key = f"INPUT_DIR{idx}"
-        block = cfg[key]
-        if not isinstance(block, dict):
-            raise ValueError(f"{key} must be a mapping")
-        if "PATH" not in block:
-            raise KeyError(f"Missing required key: {key}.PATH")
-        if "EVENTS" not in block:
-            raise KeyError(f"Missing required key: {key}.EVENTS")
-
-        if "EVENTS_VALIDATION" in block:
-            events_validation_raw = block["EVENTS_VALIDATION"]
-        else:
-            raise KeyError(f"Missing required key: {key}.EVENTS_VALIDATION")
-
-        blocks.append({
-                "path"                 : resolve_cfg_path(block["PATH"], config_path),
-                "events_raw"           : block["EVENTS"],
-                "events_validation_raw": events_validation_raw,
-                "reweight"             : parse_on_off(block.get("REWEIGHTING", "off"), f"{key}.REWEIGHTING"),
-                      })
-    return blocks
 
 
-def build_state(cfg, config_path: Path):
-    required_keys = ["INPUT_DIR1",
-                     "N_GRID",
-                     "SHERPA_ON_THE_ROCKS_DIR",
-                     "APP_TOOLS_INSTALLATION",
-                     "SHERPA_BINARY",
-                     "RIVET_ENV_SCRIPT"]
-    for key in required_keys:
-        if key not in cfg:
-            raise KeyError(f"Missing required key: {key}")
+def print_overview(plan, resume_jobs: set) -> None:
+    state = plan.state
+    print("Overview:\n")
 
-    apprentice_cfg = cfg.get("APPRENTICE")
-    professor_cfg  = cfg.get("PROFESSOR")
-    if (apprentice_cfg is None) and (professor_cfg is None):
-        raise KeyError("Provide at least one backend: APPRENTICE and/or PROFESSOR")
-    if apprentice_cfg is not None and not isinstance(apprentice_cfg, dict):
-        raise ValueError("APPRENTICE must be a mapping with at least an ORDER key")
-    if professor_cfg is not None and not isinstance(professor_cfg, dict):
-        raise ValueError("PROFESSOR must be a mapping with at least an ORDER key")
+    mpi = state.get("mpi_module", "")
+    available = "available" if mpi and check_mpi_module_available(mpi) else "NOT available"
+    print("  General settings:")
+    table([("Sherpa binary", state["sherpa_binary"]),
+           ("app-tools installation", state["app_tools_installation"]),
+           ("Apprentice installation", state["apprentice_installation"] or None),
+           ("Professor installation", state["professor_installation"] or None),
+           ("Rivet environment script", state["rivet_env_script"]),
+           ("MPI module", f"{mpi} ({available})"),
+           ("Email notifications", state["email"] or None)])
+    print()
 
-    input_dir_blocks = parse_input_dir_blocks(cfg, config_path)
-    input_dirs = [b["path"] for b in input_dir_blocks]
-    n_dirs = len(input_dirs)
+    print("  Input directories:")
+    for i in plan.indices:
+        item = plan.dirs[i - 1]
+        print(f"    Input {i}: {item['path']}")
+        table([("grid mode", item["grid_mode"]),
+               ("reweighting", "on" if item["reweight"] else None),
+               ("subruns", item["n_subruns"]),
+               ("validation subruns", item["n_val_subruns"])], indent="      ")
+    print()
 
-    for idx, idir in enumerate(input_dirs, start=1):
-        if not idir.exists() or not idir.is_dir():
-            raise FileNotFoundError(f"INPUT_DIR{idx} does not exist or is not a directory: {idir}")
+    validation = "all tune(s)"
+    if state["validation_only_err"] and state["validation_only_merged"]:
+        validation = "only merged error tune"
+    elif state["validation_only_err"]:
+        validation = "only error tune(s)"
+    elif state["validation_only_merged"]:
+        validation = "only merged tune(s)"
+    print("  Grid settings:")
+    table([("N_GRID", state["n_grid"]),
+           ("GRID_SAMPLING", state["grid_sampling"]),
+           ("validation grid", validation)])
+    print()
 
-    grid_sampling = str(cfg.get("GRID_SAMPLING", "random")).strip().lower()
-    if grid_sampling not in {"random", "uniform"}:
-        raise ValueError("GRID_SAMPLING must be 'random' or 'uniform'")
+    for key in plan.backends:
+        spec = phases.BACKENDS[key]
+        repeat = plan.repeat(key)
+        rows = [("ORDER", ", ".join(order for order, _ in plan.orders(key))),
+                ("REPEAT", f"{repeat} (best of, by objective)" if repeat > 1 else "1")]
+        rows += [(name, plan.options(key, state_key) or "(none)")
+                 for name, state_key in spec["options"]]
+        if key == "app" and plan.any_reweight:
+            rows.append(("PATTERN (split_reweighting.py)", state["pattern"]))
+        print(f"  {spec['label']} settings:")
+        table(rows)
+        print()
 
-    pattern = str(cfg.get("PATTERN", "")).strip()
-    if any(bool(b["reweight"]) for b in input_dir_blocks) and not pattern:
-        raise KeyError("Missing required key: PATTERN (required when INPUT_DIRx.REWEIGHTING is on)")
+    if plan.merged:
+        print("  Merged weights settings:")
+        table([("COMBINE_MODE", state["combine_mode"])])
+        print()
 
-    merge_mode = str(cfg.get("MERGE_MODE", "rivet")).strip().lower()
-    if merge_mode not in {"rivet", "yoda"}:
-        raise ValueError("MERGE_MODE must be 'rivet' or 'yoda'")
-
-    combine_mode = str(cfg.get("COMBINE_MODE", "weighted")).strip().lower()
-    if n_dirs >= 2 and combine_mode not in {"weighted", "simple", "custom"}:
-        raise ValueError("COMBINE_MODE must be 'weighted', 'simple' or 'custom' for multi-input tunes")
-    if n_dirs >= 2 and combine_mode == "custom":
-        custom_weights = input_dirs[0] / "custom.weights.txt"
-        if not custom_weights.exists():
-            raise FileNotFoundError(f"Missing required file: {custom_weights} "
-                                    "(required in INPUT_DIR1 when COMBINE_MODE is 'custom')")
-
-    validation_only_err    = parse_on_off(cfg.get("VALIDATION_ONLY_ERR", "off"), "VALIDATION_ONLY_ERR")
-    validation_only_merged = parse_on_off(cfg.get("VALIDATION_ONLY_MERGED", "off"), "VALIDATION_ONLY_MERGED")
-    if validation_only_merged and n_dirs < 2:
-        raise ValueError("VALIDATION_ONLY_MERGED requires at least two input directories (no merged tune exists for a single input)")
-
-    split_tuning = parse_on_off(cfg.get("SPLIT_TUNING_PROCEDURE", "off"), "SPLIT_TUNING_PROCEDURE")
-
-    max_cpus = int(cfg.get("MAX_CPUS", 8))
-    if max_cpus <= 0:
-        raise ValueError("MAX_CPUS must be > 0")
-
-    rivet_env_script        = resolve_cfg_path(cfg["RIVET_ENV_SCRIPT"], config_path)
-    sherpa_on_the_rocks_dir = resolve_cfg_path(cfg["SHERPA_ON_THE_ROCKS_DIR"], config_path)
-    app_tools_installation  = resolve_cfg_path(cfg["APP_TOOLS_INSTALLATION"], config_path)
-    sherpa_binary           = resolve_cfg_path(cfg["SHERPA_BINARY"], config_path)
-
-    if not rivet_env_script.exists():
-        raise FileNotFoundError(f"RIVET_ENV_SCRIPT does not exist: {rivet_env_script}")
-    if not sherpa_on_the_rocks_dir.exists() or not sherpa_on_the_rocks_dir.is_dir():
-        raise FileNotFoundError(f"SHERPA_ON_THE_ROCKS_DIR does not exist or is not a directory: {sherpa_on_the_rocks_dir}")
-    if not app_tools_installation.exists():
-        raise FileNotFoundError(f"APP_TOOLS_INSTALLATION does not exist: {app_tools_installation}")
-    if not sherpa_binary.exists():
-        raise FileNotFoundError(f"SHERPA_BINARY does not exist: {sherpa_binary}")
-
-    apprentice_installation = ""
-    if apprentice_cfg is not None:
-        if "APPRENTICE_INSTALLATION" not in cfg:
-            raise KeyError("Missing required key: APPRENTICE_INSTALLATION (required when APPRENTICE is configured)")
-        apprentice_installation = resolve_cfg_path(cfg["APPRENTICE_INSTALLATION"], config_path)
-        if not apprentice_installation.exists():
-            raise FileNotFoundError(f"APPRENTICE_INSTALLATION does not exist: {apprentice_installation}")
-    professor_installation = ""
-    if professor_cfg is not None:
-        if "PROFESSOR_INSTALLATION" not in cfg:
-            raise KeyError("Missing required key: PROFESSOR_INSTALLATION (required when PROFESSOR is configured)")
-        professor_installation = resolve_cfg_path(cfg["PROFESSOR_INSTALLATION"], config_path)
-        if not professor_installation.exists():
-            raise FileNotFoundError(f"PROFESSOR_INSTALLATION does not exist: {professor_installation}")
-    
-    if "JOB_DIR" in cfg:
-        job_dir = resolve_cfg_path(cfg["JOB_DIR"], config_path)
-    else: job_dir = (sherpa_on_the_rocks_dir / "tune").resolve()
-
-    n_grid = int(cfg["N_GRID"])
-    if n_grid <= 0:
-        raise ValueError("N_GRID must be > 0")
-
-    n_params = get_n_parameters(input_dirs[0] / "parameter.json")
-    min_grid_size = 0
-    apprentice, professor = {}, {}
-    if apprentice_cfg is not None:
-        if "ORDER" not in apprentice_cfg:
-            raise KeyError("Missing required key: APPRENTICE.ORDER")
-        orders = parse_order_list(apprentice_cfg["ORDER"], "APPRENTICE.ORDER",
-                                  parse_apprentice_order, lambda kq: f"{kq[0]},{kq[1]}")
-        apprentice = {
-            "orders"       : orders,
-            "orders_safe"  : [o.replace(",", "_") for o in orders],
-            "build_options": parse_backend_options(apprentice_cfg, "APP_BUILD_OPTIONS"),
-            "tune2_options": parse_backend_options(apprentice_cfg, "APP_TUNE2_OPTIONS")}
-        for order in orders:
-            k_p, k_q = parse_apprentice_order(order)
-            min_grid_size = max(min_grid_size, math.comb(n_params + k_p, k_p) + math.comb(n_params + k_q, k_q))
-    if professor_cfg is not None:
-        if "ORDER" not in professor_cfg:
-            raise KeyError("Missing required key: PROFESSOR.ORDER")
-        orders = parse_order_list(professor_cfg["ORDER"], "PROFESSOR.ORDER",
-                                  parse_professor_order, str)
-        professor = {
-            "orders"      : orders,
-            "orders_safe" : list(orders),
-            "ipol_options": parse_backend_options(professor_cfg, "PROF2_IPOL_OPTIONS"),
-            "tune_options": parse_backend_options(professor_cfg, "PROF2_TUNE_OPTIONS")}
-        for order in orders:
-            k = parse_professor_order(order)
-            min_grid_size = max(min_grid_size, math.comb(n_params + k, k))
-
-    grid_warning = ""
-    if n_grid < min_grid_size:
-        raise ValueError(f"N_GRID = {n_grid} is too small. Minimum required is "
-                         f"{min_grid_size} with N_p = {n_params} for the configured polynomial order(s).")
-    if n_grid < 2 * min_grid_size:
-        grid_warning = (f"WARNING: N_GRID = {n_grid} is < 2 * minimum = {2 * min_grid_size}. "
-                        f"Using at least double the minimum is recommended for stable surrogate fitting.")
-
-    input_states = []
-    for i, block in enumerate(input_dir_blocks, start=1):
-        idir = block["path"]
-        reweight = block["reweight"]
-        ensure_required_inputs(idir, 
-                               require_parameter=(i == 1), 
-                               require_nominal=reweight, 
-                               require_data=(apprentice_cfg is not None))
-
-        grid_mode       = "sample" if i == 1 else "import"
-        req_events      = parse_event_value(block["events_raw"])
-        req_events_val  = parse_event_value(block["events_validation_raw"])
-        template_events = parse_template_events(idir / "template.yaml")
-        n_subruns       = int(math.ceil(req_events / template_events))
-        n_val_subruns   = int(math.ceil(req_events_val / template_events))
-
-        input_states.append({
-                "path"               : str(idir),
-                "reweight"           : reweight,
-                "grid_mode"          : grid_mode,
-                "events"             : req_events,
-                "events_validation"  : req_events_val,
-                "template_events"    : template_events,
-                "n_subruns"          : n_subruns,
-                "n_val_subruns"      : n_val_subruns,
-                            })
-
-    if "MASTER_DIR" in cfg:
-        master_dir = resolve_cfg_path(cfg["MASTER_DIR"], config_path)
-    else:
-        master_dir = (input_dirs[0] / "master").resolve()
-    condor_output = str((master_dir / "condor_output").resolve())
-    if n_dirs >= 2:
-        if "MERGED_DIR" in cfg and str(cfg["MERGED_DIR"]).strip():
-            merged_dir = str(resolve_cfg_path(cfg["MERGED_DIR"], config_path))
-        else:
-            merged_dir = str((input_dirs[0] / "merged").resolve())
-    else:
-        merged_dir = ""
-
-    state = {
-        "created_at"              : datetime.now().isoformat(timespec="seconds"),
-        "config_path"             : str(config_path.resolve()),
-        "rivet_env_script"        : str(rivet_env_script),
-        "sherpa_on_the_rocks_dir" : str(sherpa_on_the_rocks_dir),
-        "app_tools_installation"  : str(app_tools_installation),
-        "apprentice_installation" : str(apprentice_installation),
-        "professor_installation"  : str(professor_installation),
-        "sherpa_binary"           : str(sherpa_binary),
-        "mpi_module"              : str(cfg.get("MPI_MODULE", "mpi/openmpi-x86_64")).strip(),
-        "numba_disable_jit"       : parse_on_off(cfg.get("NUMBA_DISABLE_JIT", "off"), "NUMBA_DISABLE_JIT"),
-        "email"                   : str(cfg.get("EMAIL", "")).strip(),
-        "condor_ids_file"         : str((master_dir / "condor_ids.json").resolve()),
-        "phase_times_file"        : str((master_dir / "phase_times.json").resolve()),
-        "dag_path"                : str((master_dir / "tune.dag").resolve()),
-        "job_dir"                 : str(job_dir),
-        "master_dir"              : str(master_dir),
-        "condor_output"           : condor_output,
-        "input_dirs"              : input_states,
-        "n_grid"                  : n_grid,
-        "grid_sampling"           : grid_sampling,
-        "apprentice"              : apprentice,
-        "professor"               : professor,
-        "split_tuning_procedure"  : split_tuning,
-        "pattern"                 : pattern,
-        "combine_mode"            : combine_mode,
-        "merged_dir"              : merged_dir,
-        "merge_mode"              : merge_mode,
-        "validation_only_err"     : validation_only_err,
-        "validation_only_merged"  : validation_only_merged,
-        "max_cpus"                : max_cpus,
-        "P1_maxruntime"           : int(cfg.get("PHASE1_MAXRUNTIME", 1800)),
-        "P2_maxruntime"           : int(cfg.get("PHASE2_MAXRUNTIME", 86400)),
-        "P3_maxruntime"           : int(cfg.get("PHASE3_MAXRUNTIME", 86400)),
-        "P4_maxruntime"           : int(cfg.get("PHASE4_MAXRUNTIME", 86400)),
-        "P5_maxruntime"           : int(cfg.get("PHASE5_MAXRUNTIME", 86400)),
-        "P6_maxruntime"           : int(cfg.get("PHASE6_MAXRUNTIME", 1800)),
-        "P7_maxruntime"           : int(cfg.get("PHASE7_MAXRUNTIME", 86400)),
-        "P8_maxruntime"           : int(cfg.get("PHASE8_MAXRUNTIME", 86400)),
-        "P9_maxruntime"           : int(cfg.get("PHASE9_MAXRUNTIME", 1800)),
-    }
-    return state, grid_warning
+    print("  Phases:")
+    rows = phases.overview_rows(plan)
+    key_width = max(len(key) for key, _, _ in rows)
+    title_width = max(len(title) for _, title, _ in rows)
+    for key, title, note in rows:
+        print(f"    {key:<{key_width}} | {title:<{title_width}} | {note}")
+    if resume_jobs:
+        print("  - Resuming jobs: " + ", ".join(sorted(resume_jobs)))
+    print()
 
 
-def p4_prep_node(i: int) -> str:
-    return f"P4_dir{i}_prep"
+# --------------------------------------------------------------------------- #
+# The merged reference data
+# --------------------------------------------------------------------------- #
 
-def p4_node(i: int, backend: str, order_safe: str) -> str:
-    return f"P4_dir{i}_{backend}_{order_safe}"
-
-def p5_node(backend: str, order_safe: str) -> str:
-    return f"P5_{backend}_{order_safe}"
-
-def backend_orders(state) -> list[tuple[str, str, str]]:
-    """All configured (backend_token, order, order_safe) combinations."""
-    out: list[tuple[str, str, str]] = []
-    for token, key in (("app", "apprentice"), ("prof", "professor")):
-        block = state.get(key) or {}
-        for order, safe in zip(block.get("orders", []), block.get("orders_safe", [])):
-            out.append((token, order, safe))
-    return out
-
-def p4_specs_for_dir(state, i: int) -> list[tuple[str, str, str]]:
-    """P4 DAG nodes for one input dir as (node_name, tune_mode, tune_order)."""
-    if not state.get("split_tuning_procedure"):
-        return [(f"P4_dir{i}", "", "")]
-    specs: list[tuple[str, str, str]] = []
-    if state["input_dirs"][i - 1]["reweight"]:
-        specs.append((p4_prep_node(i), "prep", ""))
-    specs.extend((p4_node(i, b, s), b, o) for b, o, s in backend_orders(state))
-    return specs
-
-def p5_specs(state) -> list[tuple[str, str, str]]:
-    """P5 DAG nodes as (node_name, tune_mode, tune_order)."""
-    if len(state["input_dirs"]) < 2:
-        return []
-    if not state.get("split_tuning_procedure"):
-        return [("P5", "", "")]
-    return [(p5_node(b, s), b, o) for b, o, s in backend_orders(state)]
-
-def p4_nodes_for_dir(state, i: int) -> list[str]:
-    return [name for name, _, _ in p4_specs_for_dir(state, i)]
-
-def p5_nodes(state) -> list[str]:
-    return [name for name, _, _ in p5_specs(state)]
-
-def dag_jobs(state) -> list[str]:
-    n_dirs = len(state["input_dirs"])
-    jobs: list[str] = []
-    for i in range(1, n_dirs + 1):
-        jobs.extend([f"P1_dir{i}", f"P2_dir{i}", f"P3_dir{i}"])
-        jobs.extend(p4_nodes_for_dir(state, i))
-    jobs.extend(p5_nodes(state))
-    for i in range(1, n_dirs + 1):
-        jobs.extend([f"P6_dir{i}", f"P7_dir{i}", f"P8_dir{i}"])
-    jobs.append("P9")
-    return jobs
-
-def dag_completed_jobs(phase_times: dict, state) -> set[str]:
-    completed: set[str] = set()
-    for job in dag_jobs(state):
-        if (phase_times.get(job) or {}).get("end_time"):
-            completed.add(job)
-    return completed
-
-def dag_dependencies(state) -> list[tuple[str, str]]:
-    n_dirs = len(state["input_dirs"])
-    split  = bool(state.get("split_tuning_procedure"))
-    edges: list[tuple[str, str]] = []
-    for i in range(2, n_dirs + 1):
-        edges.append(("P1_dir1", f"P1_dir{i}"))
-    for i in range(1, n_dirs + 1):
-        edges.extend([
-                (f"P1_dir{i}", f"P2_dir{i}"),
-                (f"P2_dir{i}", f"P3_dir{i}"),
-                     ])
-        if split:
-            tune_nodes = [p4_node(i, b, s) for b, _, s in backend_orders(state)]
-            if state["input_dirs"][i - 1]["reweight"]:
-                edges.append((f"P3_dir{i}", p4_prep_node(i)))
-                edges.extend((p4_prep_node(i), node) for node in tune_nodes)
-            else:
-                edges.extend((f"P3_dir{i}", node) for node in tune_nodes)
-        else:
-            edges.append((f"P3_dir{i}", f"P4_dir{i}"))
-    if n_dirs >= 2:
-        if split:
-            for b, _, s in backend_orders(state):
-                merged = p5_node(b, s)
-                for i in range(1, n_dirs + 1):
-                    edges.append((p4_node(i, b, s), merged))
-                for i in range(1, n_dirs + 1):
-                    edges.append((merged, f"P6_dir{i}"))
-        else:
-            for i in range(1, n_dirs + 1):
-                edges.append((f"P4_dir{i}", "P5"))
-            for i in range(1, n_dirs + 1):
-                edges.append(("P5", f"P6_dir{i}"))
-    else:
-        if split:
-            edges.extend((p4_node(1, b, s), "P6_dir1") for b, _, s in backend_orders(state))
-        else:
-            edges.append(("P4_dir1", "P6_dir1"))
-    for i in range(1, n_dirs + 1):
-        edges.extend([
-                (f"P6_dir{i}", f"P7_dir{i}"),
-                (f"P7_dir{i}", f"P8_dir{i}"),
-                (f"P8_dir{i}", "P9"),
-                     ])
-    return edges
-
-def dag_jobs_to_resume(phase_times: dict, state) -> set[str]:
-    completed_jobs = dag_completed_jobs(phase_times, state)
-    include: set[str] = {job for job in dag_jobs(state) if job not in completed_jobs}
-    changed = True
-    edges = dag_dependencies(state)
-    while changed:
-        changed = False
-        for parent, child in edges:
-            if parent in include and child not in include:
-                include.add(child)
-                changed = True
-    return include
+def stack_json_values(left, right):
+    if isinstance(left, list) and isinstance(right, list):
+        return left + right
+    if isinstance(left, dict) and isinstance(right, dict):
+        merged = dict(left)
+        for key, value in right.items():
+            merged[key] = stack_json_values(merged[key], value) if key in merged else value
+        return merged
+    if left == right:
+        return left
+    return [left, right]
 
 
-def diff_states(saved, current, path=""):
-    diffs: list[str] = []
-    if isinstance(saved, dict) and isinstance(current, dict):
-        for key in sorted(set(saved) | set(current), key=str):
-            sub = f"{path}.{key}" if path else str(key)
-            if key not in saved:
-                diffs.append(f"{sub}: only in current config (value {current[key]!r})")
-            elif key not in current:
-                diffs.append(f"{sub}: only in saved run (value {saved[key]!r})")
-            else:
-                diffs.extend(diff_states(saved[key], current[key], sub))
-    elif isinstance(saved, list) and isinstance(current, list):
-        if len(saved) != len(current):
-            diffs.append(f"{path}: saved has {len(saved)} entries, current has {len(current)}")
-        for i, (s, c) in enumerate(zip(saved, current), start=1):
-            diffs.extend(diff_states(s, c, f"{path}[{i}]"))
-    elif saved != current:
-        diffs.append(f"{path}: saved {saved!r}, current {current!r}")
-    return diffs
-
-
-def normalized_orders(block) -> list[str]:
-    if not isinstance(block, dict):
-        return []
-    if "orders" in block:
-        return list(block["orders"])
-    if block.get("order"):
-        return [block["order"]]
-    return []
-
-
-def structural_changes(saved_state: dict, current_state: dict) -> list[str]:
-    reasons: list[str] = []
-    saved_dirs   = [d["path"] for d in saved_state.get("input_dirs", [])]
-    current_dirs = [d["path"] for d in current_state.get("input_dirs", [])]
-    if len(saved_dirs) != len(current_dirs):
-        reasons.append(f"number of input directories changed: {len(saved_dirs)} -> {len(current_dirs)}")
-    else:
-        for i, (s, c) in enumerate(zip(saved_dirs, current_dirs), start=1):
-            if s != c:
-                reasons.append(f"INPUT_DIR{i} path changed: {s} -> {c}")
-    if saved_state.get("merged_dir", "") != current_state.get("merged_dir", ""):
-        reasons.append(f"merged directory changed: '{saved_state.get('merged_dir', '')}' "
-                       f"-> '{current_state.get('merged_dir', '')}'")
-    for key, label in (("apprentice", "APPRENTICE"), ("professor", "PROFESSOR")):
-        saved_orders   = normalized_orders(saved_state.get(key))
-        current_orders = normalized_orders(current_state.get(key))
-        if saved_orders != current_orders:
-            reasons.append(f"{label}.ORDER changed: {saved_orders} -> {current_orders} "
-                           f"(the order set is part of job identity)")
-    saved_split   = bool(saved_state.get("split_tuning_procedure", False))
-    current_split = bool(current_state.get("split_tuning_procedure", False))
-    if saved_split != current_split:
-        reasons.append(f"SPLIT_TUNING_PROCEDURE changed: "
-                       f"{'on' if saved_split else 'off'} -> {'on' if current_split else 'off'} "
-                       f"(renames all P4/P5 DAG nodes)")
-    return reasons
-
-
-def handle_resume(current_state: dict) -> tuple[dict, Path, bool, set[str]]:
-    state       = current_state
-    resume_mode = False
-    resume_jobs: set[str] = set()
-    master_dir  = Path(state["master_dir"])
-
-    def comparable_state(state: dict) -> dict:
-        normalized = json.loads(json.dumps(state))
-        normalized.pop("created_at", None)
-        normalized.pop("dag_cluster_id", None)
-        normalized.pop("config_path", None)
-        normalized.pop("email", None)
-        normalized.pop("condor_ids_file", None)
-        normalized.pop("phase_times_file", None)
-        normalized.pop("dag_path", None)
-        for backend in ("apprentice", "professor"):
-            block = normalized.get(backend)
-            if isinstance(block, dict):
-                orders = normalized_orders(block)
-                normalized[backend] = {"orders": orders} if orders else {}
-        normalized.setdefault("split_tuning_procedure", False)
-        return normalized
-    
-    def reset_phase_output(state: dict, jobs: set[str]) -> None:
-        croot = Path(state["condor_output"])
-        for job in sorted(jobs):
-            target = croot / job
-            if target.exists():
-                failed = False
-                def _on_rmtree_error(func, path, exc_info):
-                    nonlocal failed
-                    failed = True
-                shutil.rmtree(target, onerror=_on_rmtree_error)
-                if failed:
-                    print(f"Couldn't remove all files from {target} "
-                          f"(files may still be in use by running jobs); continuing.")
-            target.mkdir(parents=True, exist_ok=True)
+def warn_refdata_overlap(datasets: list) -> None:
+    """Say so when two processes contribute the same reference bins."""
+    owners: dict[str, list[int]] = {}
+    for idx, data in enumerate(datasets, start=1):
+        if not isinstance(data, dict):
+            continue
+        for binid in data:
+            owners.setdefault(str(binid), []).append(idx)
+    overlaps: dict[tuple[str, tuple[int, ...]], int] = {}
+    for binid, holders in owners.items():
+        if len(holders) < 2:
+            continue
+        key = (binid.rsplit("#", 1)[0], tuple(holders))
+        overlaps[key] = overlaps.get(key, 0) + 1
+    if not overlaps:
         return
+    print()
+    print("WARNING: reference data overlap in combined data.json:")
+    for (histname, holders), n_bins in sorted(overlaps.items()):
+        dirs = ", ".join(f"INPUT_DIR{i}" for i in holders)
+        print(f"  {histname} ({n_bins} bin{'s' if n_bins != 1 else ''}) present in {dirs}")
+    print()
 
-    def reset_phase_times(state: dict, jobs: set[str]) -> None:
-        phase_times_path = Path(state["phase_times_file"])
-        if not phase_times_path.exists():
-            return
-        try:
-            phase_times = json.loads(phase_times_path.read_text(encoding="utf-8"))
-        except Exception:
-            return
-        for job in jobs:
-            phase_times.pop(job, None)
-        phase_times_path.write_text(json.dumps(phase_times, indent=2, sort_keys=True), encoding="utf-8")
-        return
 
-    def cleanup_dagman_files(master_dir: Path, dag_path: Path) -> None:
-        base_name = dag_path.name
-        for p in sorted(master_dir.glob(f"{base_name}.*")):
-            if p.is_file():
-                p.unlink()
+def setup_merged_dir(plan) -> None:
+    """Create the merged directory and the inputs the merged phases read."""
+    if not plan.merged:
         return
+    merged_dir = plan.merged_dir
+    if merged_dir.exists() and plan.window.full:
+        raise SystemExit(f"Merged directory already exists: {merged_dir}")
+    merged_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Created merged directory: {merged_dir}")
+
+    if "app" in plan.backends:
+        datasets = [json.loads((plan.dir_path(i) / "data.json").read_text(encoding="utf-8"))
+                    for i in plan.indices]
+        warn_refdata_overlap(datasets)
+        (merged_dir / "data.json").write_text(
+            json.dumps(functools.reduce(stack_json_values, datasets), indent=2),
+            encoding="utf-8")
+        print(f"Created combined reference data JSON: {merged_dir / 'data.json'}")
+
+    if plan.state["combine_mode"] == "custom":
+        shutil.copy2(plan.dir_path(1) / "custom.weights.txt",
+                     merged_dir / "custom.weights.txt")
+        print(f"Copied custom merged weights: {merged_dir / 'custom.weights.txt'}")
+
+
+def cleanup_input_artifacts(plan) -> None:
+    """Offer to remove what the phases of this run are about to overwrite."""
+    patterns = phases.artifact_patterns(plan)
+    found = sorted(artifact
+                   for i in plan.indices
+                   for pattern in patterns
+                   for artifact in plan.dir_path(i).glob(pattern))
+    if not found:
+        return
+    print("Found existing tune artifacts in input directories:")
+    for artifact in found:
+        print(f"  - {artifact}")
+    print()
+    if not ask("Remove these artifacts before starting fresh tune? [y/N]: "):
+        print("Proceeding without removing artifacts (may cause conflicts).\n")
+        return
+    for artifact in found:
+        shutil.rmtree(artifact) if artifact.is_dir() else artifact.unlink()
+    print(f"Removed {len(found)} artifact(s).\n")
+
+
+# --------------------------------------------------------------------------- #
+# The master directory
+# --------------------------------------------------------------------------- #
+
+def prepare_master_dir(plan):
+    """Resume, wipe or create the master directory. Returns the decision."""
+    master_dir = plan.master_dir
+    decision = resume_module.Decision()
 
     if master_dir.exists():
         if not master_dir.is_dir():
             raise SystemExit(f"Master path exists but is not a directory: {master_dir}")
-
-        saved_state_path = master_dir / "state.json"
-        saved_phase_times_path = master_dir / "phase_times.json"
-        if saved_state_path.exists() and saved_phase_times_path.exists():
-            try:
-                saved_state = json.loads(saved_state_path.read_text(encoding="utf-8"))
-                phase_times = json.loads(saved_phase_times_path.read_text(encoding="utf-8"))
-            except Exception as e:
-                print(f"Found existing run metadata but could not parse it for resume: {e}")
-            else:
-                diff       = diff_states(comparable_state(saved_state), comparable_state(state))
-                structural = structural_changes(saved_state, state)
-                if diff:
-                    print("Existing run state differs from current config-derived state:")
-                    for line in diff:
-                        print(f"  - {line}")
-                    print()
-                if structural:
-                    print("Resume is not possible for this run because job identity is tied to the input directories, "
-                          "the surrogate order sets, and the split setting:")
-                    for line in structural:
-                        print(f"  - {line}")
-                    print()
-                else:
-                    resume_jobs_candidate = dag_jobs_to_resume(phase_times, state)
-                    if not resume_jobs_candidate:
-                        print("Detected existing completed run (all phases have end_time).")
-                    else:
-                        completed_jobs = dag_completed_jobs(phase_times, state)
-                        print(f"Detected resumable run in: {master_dir}")
-                        print(f"Completed jobs: {len(completed_jobs)} / {len(dag_jobs(state))}. "
-                              f"Will submit remaining jobs: {len(resume_jobs_candidate)}")
-                        if diff:
-                            print("WARNING: Resuming applies the current configuration to the remaining jobs only;")
-                            print("         already-completed phases keep outputs produced with the previous settings.")
-                            prompt = ("Resume anyway with the current configuration "
-                                      "(keeps completed outputs; resets output dirs, phase times and DAGMan files of remaining jobs)? [y/N]: ")
-                        else:
-                            prompt = ("Resume this run "
-                                      "(keeps completed outputs; resets output dirs, phase times and DAGMan files of remaining jobs)? [y/N]: ")
-                        answer = input(prompt).strip().lower()
-                        if answer in {"y", "yes"}:
-                            resume_mode = True
-                            resume_jobs = resume_jobs_candidate
-                            for key in ("created_at", "dag_cluster_id"):
-                                if key in saved_state:
-                                    state[key] = saved_state[key]
-                        else: print("Resume declined.")
-        if not resume_mode:
-            answer = input(f"Master directory already exists: {master_dir}\nRemove it and continue? [y/N]: ").strip().lower()
-            if answer not in {"y", "yes"}:
+        decision = resume_module.decide(plan, ask)
+        if not decision.resume:
+            if not ask(f"Master directory already exists: {master_dir}\n"
+                       "Remove it and continue? [y/N]: "):
                 raise SystemExit("Aborted.")
             shutil.rmtree(master_dir)
-    if not resume_mode:
+
+    if decision.resume:
+        print(f"Using existing master directory: {master_dir}\n")
+        print("Resume mode: keeping condor IDs, phase times, and completed outputs; "
+              "adopting current configuration.")
+        resume_module.apply(plan, decision)
+    else:
         master_dir.mkdir(parents=True, exist_ok=False)
         print(f"Created master directory: {master_dir}\n")
-    else:
-        print(f"Using existing master directory: {master_dir}\n")
-        print("Resume mode: keeping condor IDs, phase times, and completed outputs; adopting current configuration.")
-        reset_phase_output(state, resume_jobs)
-        reset_phase_times(state, resume_jobs)
-        cleanup_dagman_files(master_dir, Path(state["dag_path"]))
-    return state, master_dir, resume_mode, resume_jobs
+    return decision
 
 
-def cleanup_input_artifacts(state: dict) -> None:
-    input_dirs = [Path(item["path"]) for item in state["input_dirs"]]
-    patterns = ["newscan*", "Apprentice", "Professor", "validation", "chi2.json", "chi2-plots"]
-    found_artifacts = []
-    for input_dir in input_dirs:
-        for pattern in patterns:
-            for artifact in input_dir.glob(pattern):
-                found_artifacts.append(artifact)
-    if found_artifacts:
-        print("Found existing tune artifacts in input directories:")
-        for artifact in sorted(found_artifacts):
-            print(f"  - {artifact}")
-        print()
-        answer = input("Remove these artifacts before starting fresh tune? [y/N]: ").strip().lower()
-        if answer in {"y", "yes"}:
-            for artifact in found_artifacts:
-                if artifact.is_dir():
-                    shutil.rmtree(artifact)
-                else:
-                    artifact.unlink()
-            print(f"Removed {len(found_artifacts)} artifact(s).\n")
-        else: print("Proceeding without removing artifacts (may cause conflicts).\n")
-    return
+def initialise_run(plan) -> None:
+    """Everything a fresh run needs on disk before the DAG is written."""
+    for name in plan.job_names:
+        (plan.condor_output / name).mkdir(parents=True, exist_ok=True)
+    print(f"Created condor output directories: {plan.condor_output}")
+
+    setup_merged_dir(plan)
+
+    Path(plan.state["condor_ids_file"]).write_text(
+        json.dumps({"dagman": {"cluster_id": None},
+                    **{name: {"cluster_id": None} for name in plan.job_names}}, indent=2),
+        encoding="utf-8")
+    print(f"Created condor IDs file: {plan.state['condor_ids_file']}")
+
+    Path(plan.state["phase_times_file"]).write_text("{}\n", encoding="utf-8")
+    print(f"Created phase times file: {plan.state['phase_times_file']}")
 
 
-def create_dag(state, done_jobs: set[str], resume_mode: bool) -> str:
-    master_dir = Path(state["master_dir"])
-    croot      = Path(state["condor_output"])
-    job_dir    = Path(state["job_dir"])
-    state_path = str((master_dir / "state.json").resolve())
-    n_dirs     = len(state["input_dirs"])
-
-    lines = []
-    lines.append("# Auto-generated by tune.py")
-    def v(name, submit, vars_map):
-        done_suffix = " DONE" if name in done_jobs else ""
-        lines.append(f"JOB {name} {(job_dir / submit).resolve()}{done_suffix}")
-        vars_str = " ".join([f'{k}="{v}"' for k, v in vars_map.items()])
-        lines.append(f"VARS {name} {vars_str}")
-    for i in range(1, n_dirs + 1):
-        v(f"P1_dir{i}",
-          f"P1.jdf",
-            {"JOB_DIR"       : str(job_dir),
-             "STATE_JSON"    : state_path,
-             "DIR_INDEX"     : str(i),
-             "PHASE_LOG_DIR" : str(croot / f"P1_dir{i}"),
-             "MAXRUNTIME"    : str(state["P1_maxruntime"])})
-        v(f"P2_dir{i}",
-          f"P2.jdf",
-            {"JOB_DIR"       : str(job_dir),
-             "STATE_JSON"    : state_path,
-             "DIR_INDEX"     : str(i),
-             "PHASE_LOG_DIR" : str(croot / f"P2_dir{i}"),
-             "RUNS_FILE"     : str(Path(state["input_dirs"][i - 1]["path"]) / "runs.txt"),
-             "RUN_DIR"       : state["input_dirs"][i - 1]["path"],
-             "MAXRUNTIME"    : str(state["P2_maxruntime"]),
-             "PHASE_KEY"     : "P2"})
-        v(f"P3_dir{i}",
-          f"P3.jdf",
-            {"JOB_DIR"       : str(job_dir),
-             "STATE_JSON"    : state_path,
-             "DIR_INDEX"     : str(i),
-             "PHASE_LOG_DIR" : str(croot / f"P3_dir{i}"),
-             "MAXRUNTIME"    : str(state["P3_maxruntime"]),
-             "MAX_CPUS"      : str(state.get("max_cpus", 8))})
-        for name, mode, order in p4_specs_for_dir(state, i):
-            v(name,
-              f"P4.jdf",
-                {"JOB_DIR"       : str(job_dir),
-                 "STATE_JSON"    : state_path,
-                 "DIR_INDEX"     : str(i),
-                 "PHASE_LOG_DIR" : str(croot / name),
-                 "MAXRUNTIME"    : str(state["P4_maxruntime"]),
-                 "MAX_CPUS"      : str(state.get("max_cpus", 8)),
-                 "TUNE_MODE"     : mode,
-                 "TUNE_ORDER"    : order})
-    for name, mode, order in p5_specs(state):
-        v(name,
-          f"P5.jdf",
-            {"JOB_DIR"       : str(job_dir),
-             "STATE_JSON"    : state_path,
-             "PHASE_LOG_DIR" : str(croot / name),
-             "MAXRUNTIME"    : str(state["P5_maxruntime"]),
-             "MAX_CPUS"      : str(state.get("max_cpus", 8)),
-             "TUNE_MODE"     : mode,
-             "TUNE_ORDER"    : order})
-    for i in range(1, n_dirs + 1):
-        v(f"P6_dir{i}",
-          f"P6.jdf",
-            {"JOB_DIR"       : str(job_dir),
-             "STATE_JSON"    : state_path,
-             "DIR_INDEX"     : str(i),
-             "PHASE_LOG_DIR" : str(croot / f"P6_dir{i}"),
-             "MAXRUNTIME"    : str(state["P6_maxruntime"])})
-        v(f"P7_dir{i}",
-          f"P7.jdf",
-            {"JOB_DIR"       : str(job_dir),
-             "STATE_JSON"    : state_path,
-             "DIR_INDEX"     : str(i),
-             "RUN_DIR"       : state["input_dirs"][i - 1]["path"],
-             "RUNS_FILE"     : str(Path(state["input_dirs"][i - 1]["path"]) / "runs.txt"),
-             "PHASE_LOG_DIR" : str(croot / f"P7_dir{i}"),
-             "MAXRUNTIME"    : str(state["P7_maxruntime"]),
-             "PHASE_KEY"     : "P7"})
-        v(f"P8_dir{i}",
-          f"P8.jdf",
-            {"JOB_DIR"       : str(job_dir),
-             "STATE_JSON"    : state_path,
-             "DIR_INDEX"     : str(i),
-             "PHASE_LOG_DIR" : str(croot / f"P8_dir{i}"),
-             "MAXRUNTIME"    : str(state["P8_maxruntime"]),
-             "MAX_CPUS"      : str(state.get("max_cpus", 8))})
-    v(f"P9",
-      f"P9.jdf",
-        {"JOB_DIR"       : str(job_dir),
-         "STATE_JSON"    : state_path,
-         "PHASE_LOG_DIR" : str(croot / f"P9"),
-         "MAXRUNTIME"    : str(state["P9_maxruntime"]),
-         "MAX_CPUS"      : str(state.get("max_cpus", 8))})
-    post_script = str((job_dir / "post.sh").resolve())
-    email = state.get("email", "") or ""
-    if email:
-        first_job = next((j for j in dag_jobs(state) if j not in done_jobs), None)
-        if first_job:
-            if resume_mode:
-                lines.append(f"SCRIPT PRE {first_job} /bin/bash {post_script} {state_path} resume 0")
-            else:
-                lines.append(f"SCRIPT PRE {first_job} /bin/bash {post_script} {state_path} init 0")
-    for job in dag_jobs(state):
-        if job.startswith(("P2_", "P7_")):
-            lines.append(f"RETRY {job} 0")
-        lines.append(f"SCRIPT POST {job} /bin/bash {post_script} {state_path} {job} $RETURN")
-    for parent, child in dag_dependencies(state):
-        lines.append(f"PARENT {parent} CHILD {child}")
-    return "\n".join(lines) + "\n"
+def write_state(plan) -> Path:
+    path = plan.master_dir / "state.json"
+    path.write_text(json.dumps(plan.state, indent=2), encoding="utf-8")
+    return path
 
 
-def main():
-    parser = argparse.ArgumentParser()
+# --------------------------------------------------------------------------- #
+# Submission
+# --------------------------------------------------------------------------- #
+
+def submit(plan, dag_path: Path) -> None:
+    print(f"Submitting DAG: condor_submit_dag {dag_path.name}")
+    proc = subprocess.run(["condor_submit_dag", dag_path.name], cwd=str(plan.master_dir),
+                          check=False, text=True, capture_output=True)
+    if proc.stdout:
+        print(proc.stdout.strip())
+    if proc.stderr:
+        print(proc.stderr.strip())
+    if proc.returncode != 0:
+        raise SystemExit(f"condor_submit_dag failed with return code {proc.returncode}")
+
+    m = re.search(r"submitted to cluster\s+(\d+)",
+                  f"{proc.stdout or ''}\n{proc.stderr or ''}", re.IGNORECASE)
+    plan.state["dag_cluster_id"] = m.group(1) if m else "unknown"
+    write_state(plan)
+
+    condor_ids_path = Path(plan.state["condor_ids_file"])
+    condor_ids = {}
+    if condor_ids_path.exists():
+        try:
+            condor_ids = json.loads(condor_ids_path.read_text(encoding="utf-8"))
+        except Exception:
+            condor_ids = {}
+    condor_ids["dagman"] = {"cluster_id": plan.state["dag_cluster_id"]}
+    condor_ids_path.write_text(json.dumps(condor_ids, indent=2), encoding="utf-8")
+
+
+# --------------------------------------------------------------------------- #
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("config", help="Path to YAML steering file")
     args = parser.parse_args()
 
     print("Starting initialisation...\n")
-
     config_path = Path(os.path.expanduser(args.config)).resolve()
     if not config_path.exists():
         raise SystemExit(f"Config file not found: {config_path}")
@@ -949,185 +312,64 @@ def main():
     cfg = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     if not isinstance(cfg, dict):
         raise SystemExit("Config must be a YAML mapping")
-    state, grid_warning = build_state(cfg, config_path)
-    state, master_dir, resume_mode, resume_jobs = handle_resume(state)
 
-    print("Overview:\n")
+    try:
+        state, warnings = runcard.build_state(cfg, config_path)
+    except (KeyError, ValueError, FileNotFoundError) as e:
+        raise SystemExit(f"Error in {config_path}: {e.args[0] if e.args else e}") from None
+    plan = phases.Plan(state)
+    here = Path(__file__).resolve().parent
+    if plan.tune_dir.resolve() != here:
+        warnings.append(
+            f"SHERPA_ON_THE_ROCKS_DIR points the jobs at {plan.tune_dir}, but this "
+            f"is {here}. The submit files and phase scripts of the other checkout "
+            "will be used.")
+    for warning in warnings:
+        print(f"WARNING: {warning}\n")
 
-    mpi_module = state.get("mpi_module", "")
-    mpi_available = check_mpi_module_available(mpi_module) if mpi_module else False
-    mpi_status = "available" if mpi_available else "NOT available"
-    general_rows = [("Sherpa binary",             state.get("sherpa_binary", "<unset>")),
-                    ("app-tools installation",    state.get("app_tools_installation", "<unset>"))]
-    if state.get("apprentice"):
-        general_rows.append(("Apprentice installation", state.get("apprentice_installation", "<unset>")))
-    if state.get("professor"):
-        general_rows.append(("Professor installation", state.get("professor_installation", "<unset>")))
-    general_rows.append(("Rivet environment script", state.get("rivet_env_script", "<unset>")))
-    general_rows.append(("MPI module",               f"{mpi_module} ({mpi_status})"))
-    if state.get("email"):
-        general_rows.append(("Email notifications", state["email"]))
-    gw = max(len(k) for k, _ in general_rows)
-    print("  General settings:")
-    for k, v in general_rows:
-        print(f"    - {k:<{gw}} : {v}")
-    print()
+    if not plan.active_phases:
+        raise SystemExit(f"Phase window {plan.window} contains no phase this "
+                         "configuration runs.")
 
-    print("  Input directories:")
-    n_dirs = len(state["input_dirs"])
-    for idx, item in enumerate(state["input_dirs"], start=1):
-        dir_rows = [("grid mode",          item["grid_mode"]),
-                    ("reweighting",        "on" if item["reweight"] else None),
-                    ("subruns",            item["n_subruns"]),
-                    ("validation subruns", item["n_val_subruns"])]
-        dw = max(len(k) for k, _ in dir_rows)
-        print(f"    Input {idx}: {item['path']}")
-        for k, v in dir_rows:
-            if v is not None: print(f"      - {k:<{dw}} : {v}")
-    print()
+    missing = phases.missing_inputs(plan)
+    if missing:
+        print(f"Cannot start at {plan.active_phases[0].key}: the phases of window "
+              f"{plan.window} are missing inputs.")
+        for phase_key, path, why in missing:
+            print(f"  - {phase_key} needs {path} ({why})")
+        raise SystemExit("Aborted.")
 
-    print("  Grid settings:")
-    validation_grid = "all tune(s)"
-    if state["validation_only_err"] and state["validation_only_merged"]:
-        validation_grid = "only merged error tune"
-    elif state["validation_only_err"]:
-        validation_grid = "only error tune(s)"
-    elif state["validation_only_merged"]:
-        validation_grid = "only merged tune(s)"
-    grid_rows = [("N_GRID",                 state["n_grid"]),
-                 ("GRID_SAMPLING",          state["grid_sampling"]),
-                 ("validation grid",        validation_grid),
-                 ("SPLIT_TUNING_PROCEDURE", "on" if state["split_tuning_procedure"] else "off")]
-    gw = max(len(k) for k, _ in grid_rows)
-    for k, v in grid_rows:
-        print(f"    - {k:<{gw}} : {v}")
-    print()
+    decision = prepare_master_dir(plan)
+    print_overview(plan, decision.jobs if decision.resume else set())
 
-    reweight_on = any(d["reweight"] for d in state["input_dirs"])
-    if state["apprentice"]:
-        app = state["apprentice"]
-        print("  Apprentice settings:")
-        app_rows = [("ORDER",             ", ".join(app["orders"])),
-                    ("APP_BUILD_OPTIONS", app["build_options"] or "(none)"),
-                    ("APP_TUNE2_OPTIONS", app["tune2_options"] or "(none)")]
-        if reweight_on:
-            app_rows.append(("PATTERN (split_reweighting.py)", state["pattern"]))
-        aw = max(len(k) for k, _ in app_rows)
-        for k, v in app_rows:
-            print(f"    - {k:<{aw}} : {v}")
-        print()
-    if state["professor"]:
-        prof = state["professor"]
-        print("  Professor settings:")
-        prof_rows = [("ORDER",              ", ".join(prof["orders"])),
-                     ("PROF2_IPOL_OPTIONS", prof["ipol_options"] or "(none)"),
-                     ("PROF2_TUNE_OPTIONS", prof["tune_options"] or "(none)")]
-        pw = max(len(k) for k, _ in prof_rows)
-        for k, v in prof_rows:
-            print(f"    - {k:<{pw}} : {v}")
-        print()
-    if n_dirs >= 2:
-        print("  Merged weights settings:")
-        print(f"    - COMBINE_MODE : {state['combine_mode']}")
-        print()
-    if grid_warning:
-        print(grid_warning)
-        print()
+    if not decision.resume:
+        initialise_run(plan)
+    state_path = write_state(plan)
+    print(f"{'Updated' if decision.resume else 'Created'} state file: {state_path}")
 
-    print("  Phases:")
-    phase_overview = get_phase_overview(state)
-    aw = max(len(label) for _, label in phase_overview)
-    for phase, label in phase_overview:
-        if label == "SKIPPED":
-            print(f"    {phase} | {label:<{aw}} |")
-        else:
-            maxruntime = f"maxruntime = {state.get(f'{phase}_maxruntime', 'n/a')}"
-            print(f"    {phase} | {label:<{aw}} | {maxruntime}")
-    if resume_mode: print("  - Resuming jobs: " + ", ".join(sorted(resume_jobs)))
-    print()
-
-    state_path = master_dir / "state.json"
-    condor_ids = None
-    if not resume_mode:
-        jobs = dag_jobs(state)
-
-        condor_output = Path(state["condor_output"])
-        condor_output.mkdir(parents=True, exist_ok=True)
-        for job in jobs:
-            (condor_output / job).mkdir(parents=True, exist_ok=True)
-        print(f"Created condor output directories: {condor_output}")
-
-        if state["merged_dir"]:
-            merged_dir = Path(state["merged_dir"])
-            if merged_dir.exists():
-                raise SystemExit(f"Merged directory already exists: {merged_dir}")
-            merged_dir.mkdir(parents=True, exist_ok=False)
-            print(f"Created merged directory: {merged_dir}")
-            if state["apprentice"]:
-                input_dir_paths = [Path(item["path"]) for item in state["input_dirs"]]
-                write_stacked_json_values(input_dir_paths, merged_dir)
-                print(f"Created combined reference data JSON: {merged_dir / 'data.json'}")
-            if state["combine_mode"] == "custom":
-                custom_src = Path(state["input_dirs"][0]["path"]) / "custom.weights.txt"
-                shutil.copy2(custom_src, merged_dir / "custom.weights.txt")
-                print(f"Copied custom merged weights: {merged_dir / 'custom.weights.txt'}")
-
-        state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
-        print(f"Created state file: {state_path}")
-
-        condor_ids = {"dagman": {"cluster_id": None}}
-        for job in jobs:
-            condor_ids[job] = {"cluster_id": None}
-        Path(state["condor_ids_file"]).write_text(json.dumps(condor_ids, indent=2), encoding="utf-8")
-        print(f"Created condor IDs file: {state['condor_ids_file']}")
-
-        Path(state["phase_times_file"]).write_text("{}\n", encoding="utf-8")
-        print(f"Created phase times file: {state['phase_times_file']}")
-
-    all_jobs = set(dag_jobs(state))
-    done_jobs = all_jobs - resume_jobs if resume_mode else set()
-    if resume_mode:
-        state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
-        print(f"Updated state file with current configuration: {state_path}")
-    dag_content = create_dag(state, done_jobs=done_jobs, resume_mode=resume_mode)
-    dag_path = Path(state["dag_path"])
-    dag_path.write_text(dag_content, encoding="utf-8")
-    if resume_mode:
-        print(f"Created DAG file ({len(done_jobs)} of {len(all_jobs)} jobs already done): {dag_path}")
+    done_jobs = set(plan.job_names) - decision.jobs if decision.resume else set()
+    dag_path = Path(plan.state["dag_path"])
+    dag_path.write_text(phases.dag_text(plan, done_jobs, decision.resume), encoding="utf-8")
+    if decision.resume:
+        print(f"Created DAG file ({len(done_jobs)} of {len(plan.job_names)} "
+              f"jobs already done): {dag_path}")
     else:
         print(f"Created DAG file: {dag_path}")
     print()
-    if not resume_mode:
-        cleanup_input_artifacts(state)
 
-    answer = input("Proceed with DAG submission now? [y/N]: ").strip().lower()
-    if answer not in {"y", "yes"}:
-        print(f"Submission cancelled. You can review generated files in: {master_dir}")
-        print(f"Submit manually with: cd {master_dir} && condor_submit_dag {dag_path.name}")
-        print(f"\nInitialization complete!")
+    if not decision.resume:
+        cleanup_input_artifacts(plan)
+    print(f"Created job lists: {phases.write_joblists(plan)}\n")
+
+    if not ask("Proceed with DAG submission now? [y/N]: "):
+        print(f"Submission cancelled. You can review generated files in: {plan.master_dir}")
+        print(f"Submit manually with: cd {plan.master_dir} && "
+              f"condor_submit_dag {dag_path.name}")
+        print("\nInitialization complete!")
         return
-    print(f"Submitting DAG: condor_submit_dag {dag_path.name}")
-    proc = subprocess.run(["condor_submit_dag", dag_path.name],
-                        cwd=str(master_dir), check=False, text=True, capture_output=True)
-    if proc.stdout: print(proc.stdout.strip())
-    if proc.stderr: print(proc.stderr.strip())
-    if proc.returncode != 0:
-        raise SystemExit(f"condor_submit_dag failed with return code {proc.returncode}")
-    m = re.search(r"submitted to cluster\s+(\d+)", (proc.stdout or "") + "\n" + (proc.stderr or ""), re.IGNORECASE)
-    dag_cluster_id = m.group(1) if m else "unknown"
-    state["dag_cluster_id"] = dag_cluster_id
-    if state_path.exists():
-        state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
-    if condor_ids is None:
-        condor_ids = {}
-        condor_ids_path = Path(state["condor_ids_file"])
-        if condor_ids_path.exists():
-            try: condor_ids = json.loads(condor_ids_path.read_text(encoding="utf-8"))
-            except Exception: condor_ids = {}
-    condor_ids["dagman"] = {"cluster_id": dag_cluster_id}
-    Path(state["condor_ids_file"]).write_text(json.dumps(condor_ids, indent=2), encoding="utf-8")
 
-    print(f"\nInitialization complete!")
+    submit(plan, dag_path)
+    print("\nInitialization complete!")
 
 
 if __name__ == "__main__":
