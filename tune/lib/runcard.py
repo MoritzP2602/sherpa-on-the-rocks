@@ -20,7 +20,7 @@ RESERVED_OPTIONS = {
 }
 
 KNOWN_KEYS = {
-    "N_GRID", "GRID_SAMPLING", "PATTERN",
+    "N_GRID", "GRID_SAMPLING", "REWEIGHTING_PATTERN",
     "MERGE_MODE", "MERGE_OPTIONS", "COMBINE_MODE",
     "VALIDATION_ONLY_ERR", "VALIDATION_ONLY_MERGED",
     "START_PHASE", "END_PHASE",
@@ -329,9 +329,9 @@ def build_state(cfg: dict, config_path: Path) -> tuple[dict, list[str]]:
                         "least double the minimum is recommended for stable surrogate fitting.")
 
     # -- everything else ----------------------------------------------------
-    pattern = str(cfg.get("PATTERN", "")).strip()
+    pattern = str(cfg.get("REWEIGHTING_PATTERN", "")).strip()
     if any(b["reweight"] for b in blocks) and not pattern:
-        raise KeyError("Missing required key: PATTERN (required when INPUT_DIRx.REWEIGHTING is on)")
+        raise KeyError("Missing required key: REWEIGHTING_PATTERN (required when INPUT_DIRx.REWEIGHTING is on)")
 
     merge_mode = str(cfg.get("MERGE_MODE", "rivet")).strip().lower()
     if merge_mode not in {"rivet", "yoda"}:
