@@ -85,16 +85,7 @@ For each run, the script creates and manages:
 
 - a `MASTER_DIR` with state files, DAG files, and condor logs
 - tuning results in `Apprentice/` and `Professor/` folders (e.g. `tune.apprentice.*`, `tune.professor.*`)
-- chi2 values (`chi2.json`) and plots (`chi2-plots/`) generated from the validation runs
-- a forest plot of the tuned parameters and their fit errors (`params_forest.pdf`), one per input directory and one for `MERGED_DIR`
-
-A quick summary can be read from the phase 13 output:
-
-```bash
-cat MASTER_DIR/condor_output/P13/job.*.out
-```
-
-Replace `MASTER_DIR` with your configured master directory (default is `INPUT_DIR1/master` unless set explicitly).
+- chi2 values (`chi2.json`) and plots (`chi2-plots/`, `params_forest.pdf`) generated from the validation runs und tuning results
 
 
 ## Debugging and monitoring

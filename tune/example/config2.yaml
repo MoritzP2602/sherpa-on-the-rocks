@@ -15,17 +15,13 @@ N_GRID: 50
 VALIDATION_ONLY_ERR: on
 VALIDATION_ONLY_MERGED: on
 
-# START_PHASE: P10               # run only part of the pipeline: everything the
-# END_PHASE:   P13               # first phase needs must already be on disk
-
 APPRENTICE:
-  ORDER: 2,0                     # or a list of orders: ORDER: ["2,0", "3,0"]
-  # REPEAT: 3                    # submit every tune 3 times, keep the lowest objective
+  ORDER: 2,0
   APP_TUNE2_OPTIONS: -s 500 -r 20
 
 PROFESSOR:
-  ORDER: 2                       # or a list of orders: ORDER: [2, 3]
-  # REPEAT: 3                    # submit every tune 3 times, keep the lowest GOF
+  ORDER: [1, 2]
+  REPEAT: 5
 
 RIVET_ENV_SCRIPT:        ~/Programs/local/rivetenv.sh
 SHERPA_ON_THE_ROCKS_DIR: ~/sherpa-on-the-rocks

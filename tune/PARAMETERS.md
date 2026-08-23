@@ -48,7 +48,7 @@
 - `PROF2_IPOL_OPTIONS` (optional): Free-form CLI option string appended to every `prof2-ipol` call (only if non-empty). It may not repeat `--order`, `-w`, or `-j` (the thread count comes from `NPROC`).
 - `PROF2_TUNE_OPTIONS` (optional): Free-form CLI option string appended to every `prof2-tune` call (only if non-empty). It may not repeat `-w`, `-o`, or `-R`.
 
-### PATTERN
+### REWEIGHTING_PATTERN
 - **Type**: String
 - **Condition**: **Required** if any `INPUT_DIRX.REWEIGHTING` is `on`.
 - **Description**: Pattern passed to `app-tools-split_reweighting` in phase P4 to split reweighted runs.

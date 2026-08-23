@@ -103,7 +103,7 @@ def print_overview(plan, resume_jobs: set) -> None:
         rows += [(name, plan.options(key, state_key) or "(none)")
                  for name, state_key in spec["options"]]
         if key == "app" and plan.any_reweight:
-            rows.append(("PATTERN (split_reweighting.py)", state["pattern"]))
+            rows.append(("REWEIGHTING_PATTERN (split_reweighting.py)", state["pattern"]))
         print(f"  {spec['label']} settings:")
         table(rows)
         print()
