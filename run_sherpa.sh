@@ -181,7 +181,7 @@ YODA_BASENAME=$(basename "$DIRECTORY")
 YODA="$YODA_BASENAME.yoda.gz"
 SEED=$(od -An -N4 -tu4 < /dev/urandom | tr -d ' ')
 
-echo "SHERPA : $SHERPA"
+echo "SHERPA              : $SHERPA"
 echo "INTEGRATION_RESULTS : $INTEGRATION_RESULTS"
 echo "YAML                : $YAML"
 echo "YODA                : $YODA"
