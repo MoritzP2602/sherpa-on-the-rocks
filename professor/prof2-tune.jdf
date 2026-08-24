@@ -1,12 +1,11 @@
 executable   = /bin/bash
 USERNAME     = $ENV(USER)
 LOGDIR       = condor_output
-MAXRUNTIME   = 86400
+MAXRUNTIME   = $ENV(MAXRUNTIME:86400)
 PROF2_TUNE   = /PATH/TO/PROFESSOR/INSTALLATION/bin/prof2-tune
 RIVET_ENV    = /PATH/TO/RIVET/ENVIRONMENT/rivetenv.sh
 arguments    = /home/$(USERNAME)/sherpa-on-the-rocks/professor/run_prof2-tune.sh $(PROF2_TUNE) $(RIVET_ENV) $(LOGDIR) $(Cluster) $(Process) $(MAXRUNTIME) $(args)
-request_cpus = 1
-+MaxRuntime  = $(MAXRUNTIME)
++MaxRuntime  = $INT(MAXRUNTIME)
 max_idle     = 1000
 
 Log          = $(LOGDIR)/job.$(Cluster).$(Process).log

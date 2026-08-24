@@ -1,12 +1,11 @@
 executable   = /bin/bash
 USERNAME     = $ENV(USER)
 LOGDIR       = condor_output
-MAXRUNTIME   = 86400
+MAXRUNTIME   = $ENV(MAXRUNTIME:86400)
 APP_TUNE2    = /PATH/TO/APPRENTICE/INSTALLATION/bin/app-tune2
 RIVET_ENV    = /PATH/TO/RIVET/ENVIRONMENT/rivetenv.sh
 arguments    = /home/$(USERNAME)/sherpa-on-the-rocks/apprentice/run_app-tune2.sh $(APP_TUNE2) $(RIVET_ENV) $(LOGDIR) $(Cluster) $(Process) $(MAXRUNTIME) $(args)
-request_cpus = 1
-+MaxRuntime  = $(MAXRUNTIME)
++MaxRuntime  = $INT(MAXRUNTIME)
 max_idle     = 1000
 
 Log          = $(LOGDIR)/job.$(Cluster).$(Process).log

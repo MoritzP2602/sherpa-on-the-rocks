@@ -1,13 +1,13 @@
 executable   = /bin/bash
 USERNAME     = $ENV(USER)
 LOGDIR       = condor_output
-MAXRUNTIME   = 86400
+MAXRUNTIME   = $ENV(MAXRUNTIME:86400)
+NPROC        = $ENV(NPROC:1)
 APP_BUILD    = /PATH/TO/APPRENTICE/INSTALLATION/bin/app-build
 RIVET_ENV    = /PATH/TO/RIVET/ENVIRONMENT/rivetenv.sh
-NPROC        = $ENV(NPROC:1)
 arguments    = /home/$(USERNAME)/sherpa-on-the-rocks/apprentice/run_app-build.sh $(APP_BUILD) $(RIVET_ENV) $(NPROC) $(LOGDIR) $(Cluster) $(Process) $(MAXRUNTIME) $(args)
-request_cpus = $(NPROC)
-+MaxRuntime  = $(MAXRUNTIME)
++MaxRuntime  = $INT(MAXRUNTIME)
+request_cpus = $INT(NPROC)
 max_idle     = 1000
 
 Log          = $(LOGDIR)/job.$(Cluster).$(Process).log

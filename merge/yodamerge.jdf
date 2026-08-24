@@ -1,13 +1,13 @@
 executable   = /bin/bash
 USERNAME     = $ENV(USER)
 LOGDIR       = condor_output
-MAXRUNTIME   = 86400
+MAXRUNTIME   = $ENV(MAXRUNTIME:86400)
+NPROC        = $ENV(NPROC:4)
 MERGE_SCRIPT = /home/$(USERNAME)/sherpa-on-the-rocks/yodamerge_runs.sh
 RIVET_ENV    = /PATH/TO/RIVET/ENVIRONMENT/rivetenv.sh
-NPROC        = $ENV(NPROC:4)
 arguments    = /home/$(USERNAME)/sherpa-on-the-rocks/merge/run_merge.sh $(MERGE_SCRIPT) $(RIVET_ENV) $(NPROC) $(LOGDIR) $(Cluster) $(Process) $(MAXRUNTIME) $(args)
-request_cpus = $(NPROC)
-+MaxRuntime  = $(MAXRUNTIME)
++MaxRuntime  = $INT(MAXRUNTIME)
+request_cpus = $INT(NPROC)
 max_idle     = 1000
 
 Log          = $(LOGDIR)/job.$(Cluster).$(Process).log
