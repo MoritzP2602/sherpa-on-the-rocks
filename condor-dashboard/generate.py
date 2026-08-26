@@ -579,8 +579,10 @@ def _page(title, body, generated_at):
 
 # ------------------------------------------------------------- load history
 
-DAY_BINS = 96      # 15 minutes each, 00:00 -> 24:00
-WEEK_BINS = 7      # one per weekday, Monday first
+DAY_BIN_MINUTES = 15
+DAY_BINS = 100     # 15 minutes each: the last 24 hours, plus the hour ahead
+TOD_BINS = 24 * 60 // DAY_BIN_MINUTES   # time-of-day bins backing the average
+WEEK_BINS = 8      # one per day: the last 7 days, plus tomorrow
 
 
 def parse_sample(text):
@@ -645,50 +647,86 @@ def _local(epoch):
     return datetime.fromtimestamp(epoch)
 
 
-def daily_series(rows, now):
-    """(mine_today, total_today, total_average) over 15-minute bins.
+def day_window_start(now):
+    """The first bin edge of the daily chart: 24 hours before the bin `now`
+    falls in, so the whole axis slides forward with the clock."""
+    edge = _local(now.timestamp()).replace(second=0, microsecond=0)
+    edge -= timedelta(minutes=edge.minute % DAY_BIN_MINUTES)
+    return edge - timedelta(hours=24)
 
-    The average deliberately excludes today: today is still partial, and mixing
-    it in would drag the baseline toward the current moment.
+
+def day_bin_starts(now):
+    """Wall-clock start of every bin on the daily axis."""
+    start = day_window_start(now)
+    return [start + timedelta(minutes=DAY_BIN_MINUTES * i)
+            for i in range(DAY_BINS)]
+
+
+def _tod_index(stamp):
+    """Which time-of-day bin a wall-clock moment belongs to."""
+    return (stamp.hour * 60 + stamp.minute) // DAY_BIN_MINUTES
+
+
+def daily_series(rows, now):
+    """(mine, total, average) over 15-minute bins spanning the last 24 hours
+    plus the hour ahead.
+
+    The two live series run out at the current bin; only the average reaches
+    into the hour ahead, where it is the mean of that time of day over every
+    earlier day on record. Samples inside the visible window are deliberately
+    left out of that mean, so the baseline stays independent of the lines drawn
+    on top of it.
     """
-    today = _local(now.timestamp()).date()
+    starts = day_bin_starts(now)
+    window_start = starts[0]
+    window_end = starts[-1] + timedelta(minutes=DAY_BIN_MINUTES)
     cur_mine = [[] for _ in range(DAY_BINS)]
     cur_total = [[] for _ in range(DAY_BINS)]
-    past_total = [[] for _ in range(DAY_BINS)]
+    past_total = [[] for _ in range(TOD_BINS)]
     for epoch, total, mine in rows:
         stamp = _local(epoch)
-        index = (stamp.hour * 60 + stamp.minute) // 15
-        if index >= DAY_BINS:
-            continue
-        if stamp.date() == today:
+        if window_start <= stamp < window_end:
+            offset = (stamp - window_start).total_seconds()
+            index = int(offset) // (DAY_BIN_MINUTES * 60)
             cur_mine[index].append(mine)
             cur_total[index].append(total)
         else:
-            past_total[index].append(total)
+            past_total[_tod_index(stamp)].append(total)
+    average = _bin_averages(past_total)
     return (_bin_averages(cur_mine), _bin_averages(cur_total),
-            _bin_averages(past_total))
+            [average[_tod_index(start)] for start in starts])
+
+
+def week_bin_dates(now):
+    """The days on the weekly axis: the last seven, then tomorrow."""
+    start = _local(now.timestamp()).date() - timedelta(days=WEEK_BINS - 2)
+    return [start + timedelta(days=index) for index in range(WEEK_BINS)]
 
 
 def weekly_series(rows, now):
-    """(mine_week, total_week, total_average) over one bin per weekday.
+    """(mine, total, average) over one bin per day: the last 7 days, plus
+    tomorrow.
 
-    As with the daily chart the average covers every *other* week, so the
-    current partial week does not skew it.
+    Split the same way as the daily chart -- the live series stop at today, and
+    the average, taken over that weekday on every day outside the window, is
+    what carries the chart into tomorrow.
     """
-    this_week = _local(now.timestamp()).isocalendar()[:2]
+    dates = week_bin_dates(now)
+    index_of = {date: index for index, date in enumerate(dates)}
     cur_mine = [[] for _ in range(WEEK_BINS)]
     cur_total = [[] for _ in range(WEEK_BINS)]
-    past_total = [[] for _ in range(WEEK_BINS)]
+    past_total = [[] for _ in range(7)]
     for epoch, total, mine in rows:
         stamp = _local(epoch)
-        index = stamp.weekday()
-        if stamp.isocalendar()[:2] == this_week:
+        index = index_of.get(stamp.date())
+        if index is None:
+            past_total[stamp.weekday()].append(total)
+        else:
             cur_mine[index].append(mine)
             cur_total[index].append(total)
-        else:
-            past_total[index].append(total)
+    average = _bin_averages(past_total)
     return (_bin_averages(cur_mine), _bin_averages(cur_total),
-            _bin_averages(past_total))
+            [average[date.weekday()] for date in dates])
 
 
 # ------------------------------------------------------------- load charts
@@ -741,7 +779,7 @@ def _series_svg(values, colour, dashed, x_of, y_of):
     return "".join(pieces)
 
 
-def render_chart(series, x_labels, label_every=1):
+def render_chart(series, x_labels):
     """A small multi-line SVG chart.
 
     series is [(name, colour, dashed, values)]; every values list must be the
@@ -772,7 +810,7 @@ def render_chart(series, x_labels, label_every=1):
 
     # x labels
     for index, label in enumerate(x_labels):
-        if index % label_every:
+        if not label:
             continue
         parts.append(f'<text x="{x_of(index):.1f}" y="{_PLOT_H - 10}" '
                      f'text-anchor="middle" font-size="11" fill="#8a949e">'
@@ -800,26 +838,34 @@ def render_load_charts(history, now):
     mine_day, total_day, avg_day = daily_series(history, now)
     mine_week, total_week, avg_week = weekly_series(history, now)
 
-    hours = [f"{index // 4:02d}:00" if index % 4 == 0 else "" for index in range(DAY_BINS)]
-    days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    starts = day_bin_starts(now)
+    hours = [start.strftime("%H:00")
+             if start.minute == 0 and start.hour % 2 == 0 else ""
+             for start in starts]
+    dates = week_bin_dates(now)
+    days = [date.strftime("%a %d") for date in dates]
 
-    today = _local(now.timestamp())
-    day_note = today.strftime("%A %d %b")
-    year, week, _ = today.isocalendar()
-    week_note = f"week {week}, {year}"
+    day_end = starts[-1] + timedelta(minutes=DAY_BIN_MINUTES)
+    day_note = (f"{_esc(starts[0].strftime('%a %d %b %H:%M'))} &ndash; "
+                f"{_esc(day_end.strftime('%a %d %b %H:%M'))}")
+    week_note = (f"{_esc(dates[0].strftime('%a %d %b'))} &ndash; "
+                 f"{_esc(dates[-1].strftime('%a %d %b'))}")
 
     return "".join([
         "<h2>Cluster load</h2>",
-        f'<p class="sub">Running jobs today: {_esc(day_note)}, '
-        "15 minute bins. The average covers every earlier day on record.</p>",
+        f'<p class="sub">Running jobs over the last 24 hours: {day_note}, '
+        "15 minute bins. The average covers that time of day on every earlier "
+        "day on record, and is the only line that reaches into the hour "
+        "ahead.</p>",
         '<div class="card">',
         render_chart([("you", MINE_COLOUR, False, mine_day),
                       ("all users", TOTAL_COLOUR, False, total_day),
                       ("all users (average)", AVG_COLOUR, True, avg_day)],
-                     hours, label_every=8),
+                     hours),
         "</div>",
-        f'<p class="sub">Running jobs this week: {_esc(week_note)}, '
-        "daily means. The average covers every earlier week on record.</p>",
+        f'<p class="sub">Running jobs over the last 7 days: {week_note}, '
+        "daily means. The average covers that weekday on every earlier day on "
+        "record, and is the only line that reaches into tomorrow.</p>",
         '<div class="card">',
         render_chart([("you", MINE_COLOUR, False, mine_week),
                       ("all users", TOTAL_COLOUR, False, total_week),
@@ -1044,7 +1090,6 @@ echo "#LOGS"
 } | sort -u | while IFS=$'\t' read -r cid dir; do
   [ -n "${cid:-}" ] || continue
   f="$dir/condor_output/overview.$cid.log"
-  # The tune workflow nests its logs one level deeper, under the DAG node name.
   if [ ! -f "$f" ]; then
     f=$(ls "$dir"/condor_output/*/overview."$cid".log 2>/dev/null | head -n1)
   fi
@@ -1196,8 +1241,6 @@ def main():
         for gone in set(clusters) - {s.cluster for s in selections}:
             del clusters[gone]
     else:
-        # Cluster unreachable: re-render from cache rather than reporting zero.
-        # No new sample, but the existing history is still worth drawing.
         history = load_history()
         selections, summaries, raw_logs = [], {}, {}
         for cluster, record in clusters.items():
@@ -1223,6 +1266,7 @@ def main():
     prune(OUT_DIR, keep)
 
     save_state({"clusters": clusters})
+    print ("[condor-dashboard] generated at %s" % datetime.now())
     return 0 if ok else 1
 
 
