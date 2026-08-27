@@ -18,8 +18,7 @@ Nothing runs on the cluster. A timer on an always-on institute host (`ds9`) poll
 ROCKS over SSH every five minutes and writes plain HTML into your webspace.
 
 **Requirements:** `python3` 3.7 or newer on `ds9`, and passwordless SSH from the
-institute network to `rocks` — which you already have if you are submitting jobs
-with this repository.
+institute network to `rocks`.
 
 
 ## Setup
@@ -134,8 +133,7 @@ Create `~/.config/systemd/user/condor-dashboard.timer`:
 Description=Refresh the Condor job dashboard every 5 minutes
 
 [Timer]
-OnBootSec=2min
-OnUnitActiveSec=5min
+OnCalendar=*:0/5:00
 Persistent=true
 
 [Install]
@@ -178,9 +176,9 @@ The pages regenerate every five minutes on their own. Each page carries the time
 it was generated, and shows a warning banner if it is more than 30 minutes old.
 
 ```bash
-ssh ds9 '~/sherpa-on-the-rocks/condor-dashboard/generate.py'         # refresh now
-ssh ds9 '~/sherpa-on-the-rocks/condor-dashboard/forget.py <cluster>' # drop a cluster
-ssh ds9 '~/sherpa-on-the-rocks/condor-dashboard/forget.py --all'     # empty the dashboard
+~/sherpa-on-the-rocks/condor-dashboard/generate.py         # refresh now
+~/sherpa-on-the-rocks/condor-dashboard/forget.py <cluster> # drop a cluster
+~/sherpa-on-the-rocks/condor-dashboard/forget.py --all     # empty the dashboard
 ```
 
 `forget.py` hides a cluster from the dashboard by appending its id to
@@ -191,15 +189,10 @@ the queue.
 `forget.py --all` does the same for every cluster the dashboard currently lists,
 leaving anything still in the queue alone and naming what it kept.
 
-**Nothing is ever deleted, and nothing is written to the cluster.**
-`~/.condor-registry` on ROCKS is append-only — only the `condor_submit` wrapper
-writes to it — because what your dashboard chooses to display is not the
-cluster's business. Forgetting is a filter, not a deletion, which makes it
-reversible: delete a line from the forget list, rerun `generate.py`, and the
-cluster comes back with its name and counts intact. The file takes `#` comments,
-so you can note why something was hidden.
+Forgetting is only a filter (not a deletion) and is reversible: delete
+a line from the forget list, rerun `generate.py`, and the cluster comes back
+with its name and counts intact.
 
 Clusters disappear from the dashboard on their own 7 days after submission, so
 `forget.py` is only for clearing something out early. Change `RETENTION_DAYS` in
-`generate.py` if you want a different window — and because the registry keeps
-everything, raising it retroactively brings older clusters back into view.
+`generate.py` if you want a different window.
