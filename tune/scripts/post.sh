@@ -156,14 +156,30 @@ else
   if [[ "$N_JOBS" -gt 1 ]] && compgen -G "${LOG_DIR}/overview.*.log" > /dev/null 2>&1; then
     {
       OVERVIEW=$(cat "${LOG_DIR}"/overview.*.log 2>/dev/null || true)
-      N_COMPLETE=$(printf '%s\n' "$OVERVIEW" | grep -c '^\[COMPLETE\]' || true)
-      N_TIMEOUT=$(printf '%s\n'  "$OVERVIEW" | grep -c '^\[TIMEOUT\]'  || true)
-      N_FAILED=$(printf '%s\n'   "$OVERVIEW" | grep -c '^\[FAILED\]'   || true)
-      N_REMOVED=$(printf '%s\n'  "$OVERVIEW" | grep -c '^\[REMOVED\]'  || true)
-      PROBLEM_LINES=$(printf '%s\n' "$OVERVIEW" | grep -E '^\[(TIMEOUT|FAILED|REMOVED)\]' || true)
+
+      OUTCOMES=$(printf '%s\n' "$OVERVIEW" | awk '
+        $1 ~ /^\[[A-Z]+\]$/ && $2 ~ /^[0-9]+\.[0-9]+$/ {
+          if (!($2 in last)) order[++n] = $2
+          else if ($1 == "[REMOVED]" && last[$2] !~ /^\[REMOVED\]/) next
+          last[$2] = $0
+        }
+        END { for (i = 1; i <= n; i++) print last[order[i]] }')
+      N_JOBS_LOGGED=$(printf '%s\n' "$OUTCOMES" | grep -c . || true)
+      N_LINES=$(printf '%s\n' "$OVERVIEW" | grep -cE '^\[[A-Z]+\] [0-9]+\.[0-9]+ ' || true)
+      N_RESTARTED=$(( N_LINES - N_JOBS_LOGGED ))
+
+      N_COMPLETE=$(printf '%s\n' "$OUTCOMES" | grep -c '^\[COMPLETE\]' || true)
+      N_TIMEOUT=$(printf '%s\n'  "$OUTCOMES" | grep -c '^\[TIMEOUT\]'  || true)
+      N_FAILED=$(printf '%s\n'   "$OUTCOMES" | grep -c '^\[FAILED\]'   || true)
+      N_REMOVED=$(printf '%s\n'  "$OUTCOMES" | grep -c '^\[REMOVED\]'  || true)
+      PROBLEM_LINES=$(printf '%s\n' "$OUTCOMES" | grep -E '^\[(TIMEOUT|FAILED|REMOVED)\]' || true)
       OUTPUT="Job summary:
   COMPLETE / TIMEOUT / FAILED / REMOVED : ${N_COMPLETE} / ${N_TIMEOUT} / ${N_FAILED} / ${N_REMOVED}
 "
+      if [[ "$N_RESTARTED" -gt 0 ]]; then
+        OUTPUT+="  ${N_RESTARTED} attempt(s) were restarted by HTCondor and are not counted above.
+"
+      fi
       if [[ -n "$PROBLEM_LINES" ]]; then
         OUTPUT+="
 Jobs that did not complete:

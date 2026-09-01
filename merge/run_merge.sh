@@ -73,9 +73,8 @@ term_handler() {
   echo "Copying output files back to shared filesystem..."
   {
     flock -x 200
-    printf "[REMOVED] ${CLUSTER}.${PROCESS} | DIR: %s | FOLDERS: %s | Job was removed/terminated externally!\n" "$WORKDIR" "$FOLDER_LIST" >> "$STATUS_LOG"
-  } 200>"$STATUS_LOG.lock"
-  rm -f "$STATUS_LOG.lock"
+    printf "[REMOVED] ${CLUSTER}.${PROCESS} | DIR: %s | FOLDERS: %s | Job was removed/terminated externally!\n" "$WORKDIR" "$FOLDER_LIST" >&200
+  } 200>>"$STATUS_LOG"
   exit 143
 }
 trap cleanup EXIT
@@ -125,9 +124,8 @@ done
 if [ "$missing" -ne 0 ]; then
   {
     flock -x 200
-    printf "[FAILED] ${CLUSTER}.${PROCESS} | DIR: %s | FOLDERS: %s | Missing inputs\n" "$WORKDIR" "$FOLDER_LIST" >> "$STATUS_LOG"
-  } 200>"$STATUS_LOG.lock"
-  rm -f "$STATUS_LOG.lock"
+    printf "[FAILED] ${CLUSTER}.${PROCESS} | DIR: %s | FOLDERS: %s | Missing inputs\n" "$WORKDIR" "$FOLDER_LIST" >&200
+  } 200>>"$STATUS_LOG"
   exit 1
 fi
 
@@ -195,9 +193,8 @@ if [ $exit_code -ne 0 ]; then
     echo ""
     {
       flock -x 200
-      printf "[TIMEOUT] ${CLUSTER}.${PROCESS} | DIR: %s | FOLDERS: %s | Hit wall time limit of %s seconds!\n" "$WORKDIR" "$FOLDER_LIST" "$TIMEOUT" >> "$STATUS_LOG"
-    } 200>"$STATUS_LOG.lock"
-    rm -f "$STATUS_LOG.lock"
+      printf "[TIMEOUT] ${CLUSTER}.${PROCESS} | DIR: %s | FOLDERS: %s | Hit wall time limit of %s seconds!\n" "$WORKDIR" "$FOLDER_LIST" "$TIMEOUT" >&200
+    } 200>>"$STATUS_LOG"
     exit $exit_code
   else
     exit_reason="$exit_code"
@@ -210,9 +207,8 @@ if [ $exit_code -ne 0 ]; then
     echo ""
     {
       flock -x 200
-      printf "[FAILED] ${CLUSTER}.${PROCESS} | DIR: %s | FOLDERS: %s | Exit code: %s\n" "$WORKDIR" "$FOLDER_LIST" "$exit_reason" >> "$STATUS_LOG"
-    } 200>"$STATUS_LOG.lock"
-    rm -f "$STATUS_LOG.lock"
+      printf "[FAILED] ${CLUSTER}.${PROCESS} | DIR: %s | FOLDERS: %s | Exit code: %s\n" "$WORKDIR" "$FOLDER_LIST" "$exit_reason" >&200
+    } 200>>"$STATUS_LOG"
     exit $exit_code
   fi
 fi
@@ -226,6 +222,5 @@ echo "Copying output files back to shared filesystem..."
 echo ""
 {
   flock -x 200
-  printf "[COMPLETE] ${CLUSTER}.${PROCESS} | DIR: %s | FOLDERS: %s \n" "$WORKDIR" "$FOLDER_LIST" >> "$STATUS_LOG"
-} 200>"$STATUS_LOG.lock"
-rm -f "$STATUS_LOG.lock"
+  printf "[COMPLETE] ${CLUSTER}.${PROCESS} | DIR: %s | FOLDERS: %s \n" "$WORKDIR" "$FOLDER_LIST" >&200
+} 200>>"$STATUS_LOG"

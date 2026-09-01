@@ -73,9 +73,8 @@ term_handler() {
   echo "Copying output files back to shared filesystem..."
   {
     flock -x 200
-    printf "[REMOVED] ${CLUSTER}.${PROCESS} | DIR: %s | OUT: %s | Job was removed/terminated externally!\n" "$WORKDIR" "$OUTPUT_TARGET" >> "$STATUS_LOG"
-  } 200>"$STATUS_LOG.lock"
-  rm -f "$STATUS_LOG.lock"
+    printf "[REMOVED] ${CLUSTER}.${PROCESS} | DIR: %s | OUT: %s | Job was removed/terminated externally!\n" "$WORKDIR" "$OUTPUT_TARGET" >&200
+  } 200>>"$STATUS_LOG"
   exit 143
 }
 trap cleanup EXIT
@@ -100,13 +99,6 @@ fi
 
 CMD=("$APP_BUILD" "${APP_ARGS[@]}")
 if [ "$NPROC" -gt 1 ]; then
-  # Run under mpi4py's runner, which calls MPI_Abort when any rank raises an
-  # uncaught exception. app-build installs no excepthook of its own, so without
-  # this a crash in one rank leaves the other ranks blocked in the next
-  # collective: mpirun never returns and the job sits there until the wall time
-  # guard fires, hours later, instead of failing.
-  # The interpreter comes from app-build's own shebang -- the MPI module may put
-  # a different python3 on PATH, and mpi4py must match the one app-build uses.
   read -r -a APP_BUILD_SHEBANG <<<"$(sed -n '1s/^#!//p' "$APP_BUILD")"
   PY_INTERP="${APP_BUILD_SHEBANG[0]:-}"
   if [ "$(basename "$PY_INTERP" 2>/dev/null)" = "env" ]; then
@@ -173,9 +165,6 @@ if command -v module >/dev/null 2>&1; then
   module load "${MPI_MODULE:-mpi/openmpi-x86_64}" 2>/dev/null || true
 fi
 
-# The module does not always export the OpenMPI runtime libdir, and mpi4py's
-# native extension carries no RPATH, so `import apprentice` can still fail on
-# libmpi.so. Ask mpirun where its libraries live and prepend them.
 if command -v mpirun >/dev/null 2>&1; then
   MPI_LIBDIRS="$(mpirun --showme:libdirs 2>/dev/null || true)"
   if [ -n "$MPI_LIBDIRS" ]; then
@@ -209,9 +198,8 @@ if [ $exit_code -ne 0 ]; then
     echo ""
     {
       flock -x 200
-      printf "[TIMEOUT] ${CLUSTER}.${PROCESS} | DIR: %s | OUT: %s | Hit wall time limit of %s seconds!\n" "$WORKDIR" "$OUTPUT_TARGET" "$TIMEOUT" >> "$STATUS_LOG"
-    } 200>"$STATUS_LOG.lock"
-    rm -f "$STATUS_LOG.lock"
+      printf "[TIMEOUT] ${CLUSTER}.${PROCESS} | DIR: %s | OUT: %s | Hit wall time limit of %s seconds!\n" "$WORKDIR" "$OUTPUT_TARGET" "$TIMEOUT" >&200
+    } 200>>"$STATUS_LOG"
     exit $exit_code
   else
     exit_reason="$exit_code"
@@ -224,9 +212,8 @@ if [ $exit_code -ne 0 ]; then
     echo ""
     {
       flock -x 200
-      printf "[FAILED] ${CLUSTER}.${PROCESS} | DIR: %s | OUT: %s | Exit code: %s\n" "$WORKDIR" "$OUTPUT_TARGET" "$exit_reason" >> "$STATUS_LOG"
-    } 200>"$STATUS_LOG.lock"
-    rm -f "$STATUS_LOG.lock"
+      printf "[FAILED] ${CLUSTER}.${PROCESS} | DIR: %s | OUT: %s | Exit code: %s\n" "$WORKDIR" "$OUTPUT_TARGET" "$exit_reason" >&200
+    } 200>>"$STATUS_LOG"
     exit $exit_code
   fi
 fi
@@ -240,6 +227,5 @@ echo "Copying output files back to shared filesystem..."
 echo ""
 {
   flock -x 200
-  printf "[COMPLETE] ${CLUSTER}.${PROCESS} | DIR: %s | OUT: %s \n" "$WORKDIR" "$OUTPUT_TARGET" >> "$STATUS_LOG"
-} 200>"$STATUS_LOG.lock"
-rm -f "$STATUS_LOG.lock"
+  printf "[COMPLETE] ${CLUSTER}.${PROCESS} | DIR: %s | OUT: %s \n" "$WORKDIR" "$OUTPUT_TARGET" >&200
+} 200>>"$STATUS_LOG"

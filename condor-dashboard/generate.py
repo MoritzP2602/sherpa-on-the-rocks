@@ -121,6 +121,7 @@ class OverviewSummary:
     timeout: int = 0
     removed: int = 0
     unparsed: int = 0
+    restarted: int = 0
     problems: list = field(default_factory=list)
 
 
@@ -204,8 +205,19 @@ def parse_overview_line(line):
 
 
 def parse_overview(text):
-    """Summarise a whole overview log. Never raises on malformed content."""
+    """Summarise a whole overview log. Never raises on malformed content.
+
+    HTCondor reruns the same Cluster.Process from scratch when it loses contact
+    with a running job, and every attempt appends its own line -- so one job can
+    be logged [REMOVED] and later [COMPLETE]. Extra lines count as restarts, not
+    as jobs of their own. A [REMOVED] never wins over an attempt that reached a
+    real outcome, whichever landed in the file first: the orphaned attempt and
+    its replacement are killed and rescheduled off the same expired lease, so
+    the two can be written in either order.
+    """
     summary = OverviewSummary()
+    latest = {}
+    order = []
     for line in text.splitlines():
         if not line.strip():
             continue
@@ -213,6 +225,17 @@ def parse_overview(text):
         if entry is None:
             summary.unparsed += 1
             continue
+        key = (entry.cluster, entry.proc)
+        previous = latest.get(key)
+        if previous is None:
+            order.append(key)
+        else:
+            summary.restarted += 1
+            if entry.status == "REMOVED" and previous.status != "REMOVED":
+                continue
+        latest[key] = entry
+    for key in order:
+        entry = latest[key]
         summary.done += 1
         counter = _COUNTER[entry.status]
         setattr(summary, counter, getattr(summary, counter) + 1)
@@ -528,7 +551,7 @@ def _badge(selection, prefix=""):
 
 
 COUNTERS = [("done", "idle"), ("ok", "run"), ("timeout", "warn"),
-            ("removed", "warn"), ("failed", "bad")]
+            ("removed", "warn"), ("failed", "bad"), ("restarted", "warn")]
 
 
 def _count(value, css):
@@ -929,6 +952,7 @@ def render_index(selections, summaries, generated_at, queue_ok=True, history=Non
         rows = ["<tr><th>Cluster</th><th>Name</th><th class='num'>Done</th>"
                 "<th class='num'>OK</th><th class='num'>Timeout</th>"
                 "<th class='num'>Removed</th><th class='num'>Failed</th>"
+                "<th class='num'>Restarted</th>"
                 "<th>Submitted</th><th>Directory</th></tr>"]
         for sel in finished:
             summary = summaries.get(sel.cluster)
@@ -1172,7 +1196,7 @@ def summary_to_dict(summary):
     return {
         "done": summary.done, "ok": summary.ok, "failed": summary.failed,
         "timeout": summary.timeout, "removed": summary.removed,
-        "unparsed": summary.unparsed,
+        "unparsed": summary.unparsed, "restarted": summary.restarted,
         "problems": [[p.status, p.cluster, p.proc, p.dir, p.events, p.detail]
                      for p in summary.problems],
     }
@@ -1182,7 +1206,7 @@ def summary_from_dict(data):
     summary = OverviewSummary(
         done=data.get("done", 0), ok=data.get("ok", 0), failed=data.get("failed", 0),
         timeout=data.get("timeout", 0), removed=data.get("removed", 0),
-        unparsed=data.get("unparsed", 0),
+        unparsed=data.get("unparsed", 0), restarted=data.get("restarted", 0),
     )
     summary.problems = [Entry(*p) for p in data.get("problems", [])]
     return summary

@@ -114,9 +114,8 @@ term_handler() {
   echo "Copying output files back to shared filesystem..."
   {
     flock -x 200
-    printf "[REMOVED] ${CLUSTER}.${PROCESS} | DIR: %s | EVENTS: %s | Job was removed/terminated externally!\n" "$OUTDIR" "$last_event" >> "$STATUS_LOG"
-  } 200>"$STATUS_LOG.lock"
-  rm -f "$STATUS_LOG.lock"
+    printf "[REMOVED] ${CLUSTER}.${PROCESS} | DIR: %s | EVENTS: %s | Job was removed/terminated externally!\n" "$OUTDIR" "$last_event" >&200
+  } 200>>"$STATUS_LOG"
   exit 143
 }
 trap cleanup EXIT
@@ -254,9 +253,8 @@ if [ $exit_code -ne 0 ]; then
     echo "Copying output files back to shared filesystem..."
     {
       flock -x 200
-      printf "[TIMEOUT] ${CLUSTER}.${PROCESS} | DIR: %s | EVENTS: %s | Hit wall time limit of %s seconds!\n" "$OUTDIR" "$last_event" "$TIMEOUT" >> "$STATUS_LOG"
-    } 200>"$STATUS_LOG.lock"
-    rm -f "$STATUS_LOG.lock"
+      printf "[TIMEOUT] ${CLUSTER}.${PROCESS} | DIR: %s | EVENTS: %s | Hit wall time limit of %s seconds!\n" "$OUTDIR" "$last_event" "$TIMEOUT" >&200
+    } 200>>"$STATUS_LOG"
     exit 0
   else
     exit_reason="$exit_code"
@@ -270,9 +268,8 @@ if [ $exit_code -ne 0 ]; then
     echo "Copying output files back to shared filesystem..."
     {
       flock -x 200
-      printf "[FAILED] ${CLUSTER}.${PROCESS} | DIR: %s | EVENTS: %s | Exit code: %s\n" "$OUTDIR" "$last_event" "$exit_reason" >> "$STATUS_LOG"
-    } 200>"$STATUS_LOG.lock"
-    rm -f "$STATUS_LOG.lock"
+      printf "[FAILED] ${CLUSTER}.${PROCESS} | DIR: %s | EVENTS: %s | Exit code: %s\n" "$OUTDIR" "$last_event" "$exit_reason" >&200
+    } 200>>"$STATUS_LOG"
     exit $exit_code
   fi
 fi
@@ -285,6 +282,5 @@ echo ""
 echo "Copying output files back to shared filesystem..."
 {
   flock -x 200
-  printf "[COMPLETE] ${CLUSTER}.${PROCESS} | DIR: %s \n" "$OUTDIR" >> "$STATUS_LOG"
-} 200>"$STATUS_LOG.lock"
-rm -f "$STATUS_LOG.lock"
+  printf "[COMPLETE] ${CLUSTER}.${PROCESS} | DIR: %s \n" "$OUTDIR" >&200
+} 200>>"$STATUS_LOG"
