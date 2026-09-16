@@ -54,6 +54,29 @@ print_end_time() {
   printf "Total elapsed time: %d-%02d:%02d:%02d\n" "$days" "$hours" "$minutes" "$seconds"
 }
 
+log_fields() {
+  local cpu host times_file="$TMPDIR/times.${CLUSTER}.${PROCESS}"
+  FIELDS="DIR: $WORKDIR | OUT: $OUTPUT_TARGET"
+  if [ -n "$start_epoch" ]; then
+    FIELDS="$FIELDS | TOTALTIME: $(( $(date +%s) - start_epoch ))"
+    if [ -n "$qdate" ]; then
+      FIELDS="$FIELDS | WAITTIME: $(( start_epoch - qdate ))"
+    fi
+  fi
+  if [ -n "$WALL_TIME_LIMIT" ]; then
+    FIELDS="$FIELDS | WALLTIME_LIMIT: $WALL_TIME_LIMIT"
+  fi
+  times >"$times_file"
+  cpu=$(awk 'NR == 2 { for (i = 1; i <= 2; i++) { split($i, t, /[ms]/); s += t[1] * 60 + t[2] }; printf "%d", s + 0.5 }' "$times_file")
+  if [ -n "$cpu" ]; then
+    FIELDS="$FIELDS | CPUTIME: $cpu"
+  fi
+  host=$(hostname -s 2>/dev/null || true)
+  if [ -n "$host" ]; then
+    FIELDS="$FIELDS | HOST: $host"
+  fi
+}
+
 OUTPUT_TARGET=""
 cleanup() {
   cp -f "$OUTFILE" "$LOGDIR/job.${CLUSTER}.${PROCESS}.out" 2>/dev/null || true
@@ -70,9 +93,10 @@ term_handler() {
   print_end_time
   echo ""
   echo "Copying output files back to shared filesystem..."
+  log_fields
   {
     flock -x 200
-    printf "[REMOVED] ${CLUSTER}.${PROCESS} | DIR: %s | OUT: %s | Job was removed/terminated externally!\n" "$WORKDIR" "$OUTPUT_TARGET" >&200
+    printf "[REMOVED] ${CLUSTER}.${PROCESS} | %s | Job was removed/terminated externally!\n" "$FIELDS" >&200
   } 200>>"$STATUS_LOG"
   exit 143
 }
@@ -81,6 +105,7 @@ trap term_handler SIGTERM SIGINT SIGQUIT
 
 # Record the start time
 start_epoch=$(date +%s)
+qdate=$(awk '$1 == "QDate" {print $3}' "${_CONDOR_JOB_AD:-/dev/null}" 2>/dev/null || true)
 start_time=$(date '+%Y-%m-%d %H:%M:%S')
 echo "Job ${CLUSTER}.${PROCESS} started on $(hostname) at: $start_time"
 echo ""
@@ -156,9 +181,10 @@ if [ $exit_code -ne 0 ]; then
     echo ""
     print_end_time
     echo ""
+    log_fields
     {
       flock -x 200
-      printf "[TIMEOUT] ${CLUSTER}.${PROCESS} | DIR: %s | OUT: %s | Hit wall time limit of %s seconds!\n" "$WORKDIR" "$OUTPUT_TARGET" "$TIMEOUT" >&200
+      printf "[TIMEOUT] ${CLUSTER}.${PROCESS} | %s | Hit wall time limit of %s seconds!\n" "$FIELDS" "$TIMEOUT" >&200
     } 200>>"$STATUS_LOG"
     exit $exit_code
   else
@@ -170,9 +196,10 @@ if [ $exit_code -ne 0 ]; then
     echo ""
     print_end_time
     echo ""
+    log_fields
     {
       flock -x 200
-      printf "[FAILED] ${CLUSTER}.${PROCESS} | DIR: %s | OUT: %s | Exit code: %s\n" "$WORKDIR" "$OUTPUT_TARGET" "$exit_reason" >&200
+      printf "[FAILED] ${CLUSTER}.${PROCESS} | %s | Exit code: %s\n" "$FIELDS" "$exit_reason" >&200
     } 200>>"$STATUS_LOG"
     exit $exit_code
   fi
@@ -185,7 +212,8 @@ print_end_time
 echo ""
 echo "Copying output files back to shared filesystem..."
 echo ""
+log_fields
 {
   flock -x 200
-  printf "[COMPLETE] ${CLUSTER}.${PROCESS} | DIR: %s | OUT: %s \n" "$WORKDIR" "$OUTPUT_TARGET" >&200
+  printf "[COMPLETE] ${CLUSTER}.${PROCESS} | %s\n" "$FIELDS" >&200
 } 200>>"$STATUS_LOG"

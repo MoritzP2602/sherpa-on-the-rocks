@@ -2,17 +2,14 @@
 """Hide clusters from the Condor dashboard.
 
 This appends the cluster id to ~/.config/condor-dashboard/forgotten on this host,
-drops its cached state, and (on the next generator run) removes its page and
+drops its cached state, and (on the next generate.py call) removes its page and
 copied overview log from ~/www/condor.
-
-Nothing is deleted, and nothing is written to the cluster: ~/.condor-registry on
-rocks keeps its record of every submission, and the job output there -- the real
-<submitdir>/condor_output/ and its overview.<cluster>.log -- is left alone. To
-bring a cluster back, delete its line from the forget list and rerun generate.py.
 
 Usage:
     forget.py <cluster> [<cluster> ...]
     forget.py --all              everything the dashboard currently lists
+
+Disclaimer: entire script written by claude opus
 """
 
 from __future__ import annotations

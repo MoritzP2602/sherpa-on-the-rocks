@@ -2,33 +2,29 @@
 """Generate a static dashboard of HTCondor job status.
 
 Runs on an always-on institute host (ds9) and publishes into ~/www/condor.
+
+Disclaimer: entire script written by claude opus
 """
 
 from __future__ import annotations
 
 import getpass
 import html
+import itertools
 import json
+import math
 import os
 import re
 import shlex
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import astuple, dataclass, field
 from datetime import datetime, timedelta, timezone
 
 def _tilde(path):
     """Shorten a leading home directory to ~, so the commands shown on the
     generated pages stay short and readable.
-
-    Checks $HOME both as-is and resolved, because on the institute machines they
-    differ as strings: $HOME is /home/<user> while a file under it resolves to
-    /net/theorie/home/<user>. The same directory reached two ways, so a plain
-    prefix test against one of them alone silently fails.
-
-    Does not resolve `path` itself: this is called on the directory this script
-    was reached through, and that apparent location is the answer we want.
     """
     path = os.path.abspath(path)
     home = os.path.expanduser("~")
@@ -71,6 +67,9 @@ REGISTRY_PATH = "$HOME/.condor-registry"
 FORGOTTEN_FILE = os.path.expanduser("~/.config/condor-dashboard/forgotten")
 RETENTION_DAYS = 7
 STALE_MINUTES = 30
+# How often the systemd timer runs this script; drives the countdown on the
+# index page, so keep it equal to the timer's OnCalendar step.
+REFRESH_MINUTES = 5
 SSH_TIMEOUT = 120
 
 FILE_MARKER = "@@CONDOR-DASH-FILE@@"
@@ -104,16 +103,37 @@ class Entry:
     dir: str | None = None
     events: str | None = None
     detail: str | None = None
+    totaltime: int | None = None
+    waittime: int | None = None
+    wall_limit: int | None = None
+    cputime: int | None = None
+    nproc: int | None = None
+    host: str | None = None
+    seed: str | None = None
+
+
+@dataclass
+class JobTiming:
+    """The per-job numbers the runtime plots need, in seconds."""
+
+    status: str
+    totaltime: int | None = None
+    waittime: int | None = None
+    wall_limit: int | None = None
+    cputime: int | None = None
+    nproc: int | None = None
+
+    @property
+    def efficiency(self):
+        """CPU time per requested core-second, or None without the inputs."""
+        if self.cputime is None or not self.totaltime:
+            return None
+        return self.cputime / (self.totaltime * (self.nproc or 1))
 
 
 @dataclass
 class OverviewSummary:
-    """Aggregate of one overview log.
-
-    done counts jobs that reached a terminal state and reported. It is NOT the
-    number submitted -- that is unknowable here, since the queue only reports
-    jobs that have not yet left it.
-    """
+    """Aggregate of one overview log."""
 
     done: int = 0
     ok: int = 0
@@ -123,6 +143,7 @@ class OverviewSummary:
     unparsed: int = 0
     restarted: int = 0
     problems: list = field(default_factory=list)
+    timings: list = field(default_factory=list)
 
 
 @dataclass
@@ -176,14 +197,22 @@ _HEAD = re.compile(r"^\[(COMPLETE|FAILED|TIMEOUT|REMOVED)\]\s+(\d+)\.(\d+)$")
 _WALL_LIMIT = re.compile(r"Hit wall time limit of\s+(\S+)\s+seconds")
 _COUNTER = {"COMPLETE": "ok", "FAILED": "failed", "TIMEOUT": "timeout",
             "REMOVED": "removed"}
+_FIELDS = {"DIR": "dir", "EVENTS": "events", "Exit code": "detail",
+           "HOST": "host", "SEED": "seed", "TOTALTIME": "totaltime",
+           "WAITTIME": "waittime", "WALLTIME_LIMIT": "wall_limit",
+           "CPUTIME": "cputime", "NPROC": "nproc"}
+_INT_FIELDS = {"totaltime", "waittime", "wall_limit", "cputime", "nproc"}
+
+
+def _int_or_none(text):
+    try:
+        return int(text)
+    except ValueError:
+        return None
 
 
 def parse_overview_line(line):
-    """Parse one overview log line, or return None if it is not one.
-
-    Every field except the leading tag is optional: run_app-build.sh omits DIR,
-    and EVENTS may be the literal string "unknown".
-    """
+    """Parse one overview log line, or return None if it is not one."""
     segments = [s.strip() for s in line.split("|")]
     head = _HEAD.match(segments[0])
     if not head:
@@ -191,30 +220,30 @@ def parse_overview_line(line):
 
     entry = Entry(status=head.group(1), cluster=head.group(2), proc=head.group(3))
     for segment in segments[1:]:
-        if segment.startswith("DIR:"):
-            entry.dir = segment[len("DIR:"):].strip()
-        elif segment.startswith("EVENTS:"):
-            entry.events = segment[len("EVENTS:"):].strip()
-        elif segment.startswith("Exit code:"):
-            entry.detail = segment[len("Exit code:"):].strip()
-        else:
+        key, colon, value = segment.partition(":")
+        attr = _FIELDS.get(key) if colon else None
+        if attr is None:
             wall = _WALL_LIMIT.search(segment)
             if wall:
                 entry.detail = wall.group(1)
+        elif attr in _INT_FIELDS:
+            setattr(entry, attr, _int_or_none(value))
+        else:
+            setattr(entry, attr, value.strip())
     return entry
 
 
-def parse_overview(text):
-    """Summarise a whole overview log. Never raises on malformed content.
+def _timing(entry):
+    """The entry's JobTiming, or None when its line carried no timing at all."""
+    values = (entry.totaltime, entry.waittime, entry.wall_limit, entry.cputime,
+              entry.nproc)
+    if all(v is None for v in values):
+        return None
+    return JobTiming(entry.status, *values)
 
-    HTCondor reruns the same Cluster.Process from scratch when it loses contact
-    with a running job, and every attempt appends its own line -- so one job can
-    be logged [REMOVED] and later [COMPLETE]. Extra lines count as restarts, not
-    as jobs of their own. A [REMOVED] never wins over an attempt that reached a
-    real outcome, whichever landed in the file first: the orphaned attempt and
-    its replacement are killed and rescheduled off the same expired lease, so
-    the two can be written in either order.
-    """
+
+def parse_overview(text):
+    """Summarise a whole overview log. Never raises on malformed content."""
     summary = OverviewSummary()
     latest = {}
     order = []
@@ -241,15 +270,14 @@ def parse_overview(text):
         setattr(summary, counter, getattr(summary, counter) + 1)
         if entry.status != "COMPLETE":
             summary.problems.append(entry)
+        timing = _timing(entry)
+        if timing is not None:
+            summary.timings.append(timing)
     return summary
 
 
 def parse_registry(text):
-    """Read the append-only registry the condor_submit wrapper writes.
-
-    Malformed lines are skipped rather than fatal: an interactive shell appends
-    to this file and must never be able to break the dashboard.
-    """
+    """Read the append-only registry the condor_submit wrapper writes."""
     registry = {}
     for line in text.splitlines():
         fields = line.split("\t")
@@ -270,20 +298,12 @@ def parse_registry(text):
 
 
 def parse_forgotten(text):
-    """Cluster ids recorded as forgotten, one per line.
-
-    Anything that is not a bare number is ignored, so the file can be commented
-    and hand-edited: deleting a line here brings a cluster back.
-    """
+    """Cluster ids recorded as forgotten, one per line."""
     return {line.strip() for line in text.splitlines() if line.strip().isdigit()}
 
 
 def load_forgotten(path=None):
-    """The forget list, or an empty set if it has never been written.
-
-    Resolves the path when called rather than binding it as a default, so a test
-    that redirects FORGOTTEN_FILE is actually obeyed.
-    """
+    """The forget list, or an empty set if it has never been written."""
     try:
         with open(path or FORGOTTEN_FILE) as handle:
             return parse_forgotten(handle.read())
@@ -300,12 +320,7 @@ def _field(fields, index):
 
 
 def parse_condor_q(text):
-    """Parse `condor_q -af:t ClusterId ProcId JobStatus Iwd Args Cmd` output.
-
-    Tab separation matters: Iwd and Args both contain spaces, so whitespace
-    splitting cannot tell them apart. Falls back to whitespace splitting so
-    output from a plain `-af` still parses.
-    """
+    """Parse `condor_q -af:t ClusterId ProcId JobStatus Iwd Args Cmd` output."""
     queue = {}
     for line in text.splitlines():
         if not line.strip():
@@ -395,13 +410,7 @@ def split_fetched_logs(stream, marker=FILE_MARKER):
 
 def select_clusters(registry, queue, mtimes, now, retention_days=RETENTION_DAYS,
                     forgotten=()):
-    """Choose which clusters to display, newest first.
-
-    A cluster is shown if it has jobs in the queue right now, or was submitted
-    within the retention window, and has not been forgotten. Forgetting is a
-    filter applied here rather than a deletion from the registry, so the record
-    of what was submitted survives.
-    """
+    """Choose which clusters to display, newest first."""
     cutoff = now - timedelta(days=retention_days)
     selections = []
     for cluster in set(registry) | set(queue):
@@ -475,6 +484,10 @@ padding:12px 14px 8px;margin-bottom:16px}
 .legend{display:flex;gap:16px;flex-wrap:wrap;padding:2px 4px 4px;font-size:.8em;color:#5a6570}
 .lg{display:inline-flex;align-items:center;gap:6px}
 .lg i{width:14px;height:3px;border-radius:2px;display:inline-block}
+.lg b{width:11px;height:11px;border-radius:2px;display:inline-block}
+.stack{display:flex;height:22px;border-radius:6px;overflow:hidden;background:#eef1f4;
+margin:6px 0 8px}
+.stack span{display:block;height:100%}
 /* Label, command and button are grid items, not inline text, so the three line
    up in columns however long an individual label or command is. */
 .cmds{margin-top:26px;display:grid;grid-template-columns:auto auto auto;
@@ -498,6 +511,26 @@ _STALE_JS = """
   }
 })();
 (function(){
+  var el=document.getElementById('next'),st=document.getElementById('stale');
+  if(!el||!st)return;
+  var step=%(refresh)d*60000,grace=20000,now=Date.now();
+  var gen=new Date(st.dataset.generated).getTime();
+  var due=Math.floor(gen/step)*step+step;
+  var overdue=now>due+grace;
+  var reloadAt=overdue?(now-due<step?now+60000:Math.ceil(now/step)*step+grace):due+grace;
+  var reloading=false;
+  function pad(n){return (n<10?'0':'')+n;}
+  function hm(t){var d=new Date(t);return pad(d.getHours())+':'+pad(d.getMinutes());}
+  function tick(){
+    var now=Date.now(),left=Math.max(0,Math.round((due-now)/1000)),m=Math.floor(left/60);
+    if(now<due)el.textContent=' \u00b7 next refresh at '+hm(due)+' (in '+m+':'+pad(left-60*m)+')';
+    else if(overdue)el.textContent=' \u00b7 refresh overdue, retrying at '+hm(reloadAt);
+    else el.textContent=' \u00b7 refreshing\u2026';
+    if(now>=reloadAt&&!reloading){reloading=true;location.reload();}
+  }
+  tick();setInterval(tick,1000);
+})();
+(function(){
   document.querySelectorAll('.copy').forEach(function(b){
     b.addEventListener('click',function(){
       navigator.clipboard.writeText(b.dataset.cmd).then(function(){
@@ -517,9 +550,6 @@ def _esc(value):
 def _name(selection):
     """The job's name: the submit file it was submitted with, without the
     extension, e.g. sherpa-01.jdf -> sherpa-01.
-
-    Falls back to the submit directory for clusters known only from condor_q,
-    which does not report which file was submitted.
     """
     if selection.submit_file:
         return os.path.splitext(os.path.basename(selection.submit_file.strip()))[0]
@@ -529,11 +559,7 @@ def _name(selection):
 
 
 def _icon_html(icon, prefix=""):
-    """Render an icon that is either an emoji or an image file in ICON_DIR.
-
-    `prefix` is how far the page is below OUT_DIR ("../" for a cluster page):
-    icons/ sits at the top level and every page reaches it relatively.
-    """
+    """Render an icon that is either an emoji or an image file in ICON_DIR."""
     if not icon:
         return ""
     if icon.lower().endswith(ICON_SUFFIXES):
@@ -596,7 +622,8 @@ def _page(title, body, generated_at):
         f"{body}\n\n"
         f'<p class="sub">Generated {_when(generated_at)}</p>\n'
         f"</div>\n"
-        f"<script>{_STALE_JS % {'minutes': STALE_MINUTES}}</script>\n"
+        f"<script>{_STALE_JS % {'minutes': STALE_MINUTES, 'refresh': REFRESH_MINUTES}}"
+        "</script>\n"
     )
 
 
@@ -605,7 +632,8 @@ def _page(title, body, generated_at):
 DAY_BIN_MINUTES = 15
 DAY_BINS = 100     # 15 minutes each: the last 24 hours, plus the hour ahead
 TOD_BINS = 24 * 60 // DAY_BIN_MINUTES   # time-of-day bins backing the average
-WEEK_BINS = 8      # one per day: the last 7 days, plus tomorrow
+WEEK_DAYS = 8      # the last 7 days, plus tomorrow
+WEEK_BINS = WEEK_DAYS * 24   # one per hour
 
 
 def parse_sample(text):
@@ -636,11 +664,7 @@ def load_history(path=HISTORY_FILE):
 
 
 def update_history(sample, path=HISTORY_FILE):
-    """Record `sample` and return the full series, pruned to HISTORY_DAYS.
-
-    Appends in the common case; only rewrites the file on the rare refresh where
-    pruning actually drops something.
-    """
+    """Record `sample` and return the full series, pruned to HISTORY_DAYS."""
     rows = load_history(path)
     if sample is None:
         return rows
@@ -693,12 +717,6 @@ def _tod_index(stamp):
 def daily_series(rows, now):
     """(mine, total, average) over 15-minute bins spanning the last 24 hours
     plus the hour ahead.
-
-    The two live series run out at the current bin; only the average reaches
-    into the hour ahead, where it is the mean of that time of day over every
-    earlier day on record. Samples inside the visible window are deliberately
-    left out of that mean, so the baseline stays independent of the lines drawn
-    on top of it.
     """
     starts = day_bin_starts(now)
     window_start = starts[0]
@@ -722,34 +740,30 @@ def daily_series(rows, now):
 
 def week_bin_dates(now):
     """The days on the weekly axis: the last seven, then tomorrow."""
-    start = _local(now.timestamp()).date() - timedelta(days=WEEK_BINS - 2)
-    return [start + timedelta(days=index) for index in range(WEEK_BINS)]
+    start = _local(now.timestamp()).date() - timedelta(days=WEEK_DAYS - 2)
+    return [start + timedelta(days=index) for index in range(WEEK_DAYS)]
 
 
 def weekly_series(rows, now):
-    """(mine, total, average) over one bin per day: the last 7 days, plus
+    """(mine, total, average) over hourly bins spanning the last 7 days, plus
     tomorrow.
-
-    Split the same way as the daily chart -- the live series stop at today, and
-    the average, taken over that weekday on every day outside the window, is
-    what carries the chart into tomorrow.
     """
     dates = week_bin_dates(now)
-    index_of = {date: index for index, date in enumerate(dates)}
     cur_mine = [[] for _ in range(WEEK_BINS)]
     cur_total = [[] for _ in range(WEEK_BINS)]
-    past_total = [[] for _ in range(7)]
+    past_total = [[] for _ in range(7 * 24)]
     for epoch, total, mine in rows:
         stamp = _local(epoch)
-        index = index_of.get(stamp.date())
-        if index is None:
-            past_total[stamp.weekday()].append(total)
+        day = (stamp.date() - dates[0]).days
+        if 0 <= day < WEEK_DAYS:
+            cur_mine[day * 24 + stamp.hour].append(mine)
+            cur_total[day * 24 + stamp.hour].append(total)
         else:
-            cur_mine[index].append(mine)
-            cur_total[index].append(total)
+            past_total[stamp.weekday() * 24 + stamp.hour].append(total)
     average = _bin_averages(past_total)
     return (_bin_averages(cur_mine), _bin_averages(cur_total),
-            [average[date.weekday()] for date in dates])
+            [average[date.weekday() * 24 + hour]
+             for date in dates for hour in range(24)])
 
 
 # ------------------------------------------------------------- load charts
@@ -866,7 +880,8 @@ def render_load_charts(history, now):
              if start.minute == 0 and start.hour % 2 == 0 else ""
              for start in starts]
     dates = week_bin_dates(now)
-    days = [date.strftime("%a %d") for date in dates]
+    days = [date.strftime("%a %d") if hour == 0 else ""
+            for date in dates for hour in range(24)]
 
     day_end = starts[-1] + timedelta(minutes=DAY_BIN_MINUTES)
     day_note = (f"{_esc(starts[0].strftime('%a %d %b %H:%M'))} &ndash; "
@@ -878,7 +893,7 @@ def render_load_charts(history, now):
         "<h2>Cluster load</h2>",
         f'<p class="sub">Running jobs over the last 24 hours: {day_note}, '
         "15 minute bins. The average covers that time of day on every earlier "
-        "day on record, and is the only line that reaches into the hour "
+        "day on record."
         "ahead.</p>",
         '<div class="card">',
         render_chart([("you", MINE_COLOUR, False, mine_day),
@@ -887,8 +902,8 @@ def render_load_charts(history, now):
                      hours),
         "</div>",
         f'<p class="sub">Running jobs over the last 7 days: {week_note}, '
-        "daily means. The average covers that weekday on every earlier day on "
-        "record, and is the only line that reaches into tomorrow.</p>",
+        "hourly means. The average covers that weekday and hour on every earlier "
+        "day on record.</p>",
         '<div class="card">',
         render_chart([("you", MINE_COLOUR, False, mine_week),
                       ("all users", TOTAL_COLOUR, False, total_week),
@@ -898,6 +913,351 @@ def render_load_charts(history, now):
     ])
 
 
+# ------------------------------------------------------------- runtime plots
+
+STATUS_ORDER = ["COMPLETE", "FAILED", "TIMEOUT", "REMOVED"]
+STATUS_COLOURS = {"COMPLETE": "#1b7a43", "FAILED": "#b3261e",
+                  "TIMEOUT": "#9a5b00", "REMOVED": "#d9a24a"}
+WAIT_COLOUR = "#aeb6be"
+HIST_BINS = 40
+_TIME_STEPS = [60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200,
+               86400, 172800, 345600, 604800]
+_PERCENT_STEPS = [25, 50, 100, 200, 500]
+
+
+def _hm(seconds):
+    """A duration as h:mm, for axis labels."""
+    seconds = int(round(seconds))
+    return f"{seconds // 3600}:{seconds % 3600 // 60:02d}"
+
+
+def _hms(seconds):
+    """A duration as h:mm:ss, for tables."""
+    seconds = int(round(seconds))
+    return f"{seconds // 3600}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
+
+
+def _ticks(xmax, steps, label, fallback):
+    """(value, label) axis ticks at the smallest round step in `steps` that
+    keeps them to eight or fewer, else at a multiple of `fallback`."""
+    step = next((s for s in steps if xmax / s <= 8), None)
+    if step is None:
+        step = fallback * math.ceil(xmax / (8 * fallback))
+    return [(v, label(v)) for v in range(0, int(xmax) + 1, step)]
+
+
+def _basis(n, total):
+    """The 'based on N of M jobs' note, empty when every job counted."""
+    return f" Based on {n} of {total} jobs." if n < total else ""
+
+
+def _mean_std(values):
+    """(N, mean, sample standard deviation); std is None below two values."""
+    n = len(values)
+    if n == 0:
+        return 0, None, None
+    mean = sum(values) / n
+    if n < 2:
+        return n, mean, None
+    return n, mean, math.sqrt(sum((v - mean) ** 2 for v in values) / (n - 1))
+
+
+def _mode(values):
+    """The most common value, the largest winning a tie."""
+    return max(set(values), key=lambda v: (values.count(v), v))
+
+
+def _histogram(values, xmax, bins):
+    """Per-status counts over `bins` equal bins spanning [0, xmax], from
+    [(x, status)]. A value at xmax itself lands in the last bin."""
+    counts = {status: [0] * bins for status in STATUS_ORDER}
+    for x, status in values:
+        counts[status][min(max(int(x / xmax * bins), 0), bins - 1)] += 1
+    return counts
+
+
+def survival(jobs):
+    """Kaplan-Meier estimate of the fraction of jobs not yet complete."""
+    steps, censored = [(0, 1.0)], []
+    s, at_risk = 1.0, len(jobs)
+    for t, group in itertools.groupby(sorted(jobs), key=lambda job: job[0]):
+        group = list(group)
+        done = sum(1 for _, status in group if status == "COMPLETE")
+        if done:
+            s *= 1 - done / at_risk
+            steps.append((t, s))
+        censored.extend((t, s, status) for _, status in group if status != "COMPLETE")
+        at_risk -= len(group)
+    return steps, censored
+
+
+def _reached(steps, level):
+    """The first runtime at which S drops to `level`, or None."""
+    for t, s in steps:
+        if s <= level + 1e-9:
+            return t
+    return None
+
+
+def _svg_open():
+    return (f'<svg class="chart" style="min-width:{_PLOT_W}px" '
+            f'viewBox="0 0 {_PLOT_W} {_PLOT_H}" role="img" preserveAspectRatio="none">')
+
+
+def _x_axis(ticks, x_of):
+    """Tick labels along the bottom edge; one at the right margin hugs it."""
+    parts = []
+    for value, label in ticks:
+        x = x_of(value)
+        anchor = "end" if x > _PLOT_W - _PLOT_R - 14 else "middle"
+        parts.append(f'<text x="{x:.1f}" y="{_PLOT_H - 10}" text-anchor="{anchor}" '
+                     f'font-size="11" fill="#8a949e">{_esc(label)}</text>')
+    return "".join(parts)
+
+
+def _y_axis(labels):
+    """Three horizontal grid lines with their labels, bottom to top."""
+    plot_h = _PLOT_H - _PLOT_T - _PLOT_B
+    parts = []
+    for fraction, label in zip((0, 0.5, 1), labels):
+        y = _PLOT_T + plot_h - fraction * plot_h
+        parts.append(f'<line x1="{_PLOT_L}" y1="{y:.1f}" x2="{_PLOT_W - _PLOT_R}" '
+                     f'y2="{y:.1f}" stroke="#e1e6ea" stroke-width="1"/>')
+        parts.append(f'<text x="{_PLOT_L - 8}" y="{y + 4:.1f}" text-anchor="end" '
+                     f'font-size="11" fill="#8a949e">{_esc(label)}</text>')
+    return "".join(parts)
+
+
+def _marker(x, label):
+    """A labelled dashed vertical line, for the wall time limit."""
+    return (f'<line x1="{x:.1f}" y1="{_PLOT_T}" x2="{x:.1f}" y2="{_PLOT_H - _PLOT_B}" '
+            f'stroke="#8a949e" stroke-width="1.2" stroke-dasharray="5 4"/>'
+            f'<text x="{x - 5:.1f}" y="{_PLOT_T + 11}" text-anchor="end" '
+            f'font-size="11" fill="#8a949e" paint-order="stroke" stroke="#fff" '
+            f'stroke-width="3">{_esc(label)}</text>')
+
+
+def _status_legend(counts):
+    """A colour square and job count per status present."""
+    return '<div class="legend">' + "".join(
+        f'<span class="lg"><b style="background:{STATUS_COLOURS[s]}"></b>{s} ({n})</span>'
+        for s, n in counts.items() if n) + "</div>"
+
+
+def render_histogram(counts, xmax, ticks, marker=None, fmt=str):
+    """A stacked-bar SVG histogram in the style of render_chart."""
+    bins = len(next(iter(counts.values())))
+    plot_w = _PLOT_W - _PLOT_L - _PLOT_R
+    plot_h = _PLOT_H - _PLOT_T - _PLOT_B
+    totals = [sum(counts[s][i] for s in counts) for i in range(bins)]
+    top = _nice_max(totals)
+    top += top % 2
+    def x_of(value):
+        return _PLOT_L + value / xmax * plot_w
+    def y_of(value):
+        return _PLOT_T + plot_h - value / top * plot_h
+
+    parts = [_svg_open(), _y_axis([str(int(top * f)) for f in (0, 0.5, 1)]),
+             _x_axis(ticks, x_of)]
+    width = max(plot_w / bins - 1, 1)
+    for index in range(bins):
+        if not totals[index]:
+            continue
+        lo, hi = index * xmax / bins, (index + 1) * xmax / bins
+        title = f"{fmt(lo)} \u2013 {fmt(hi)}: " + ", ".join(
+            f"{counts[s][index]} {s}" for s in STATUS_ORDER if counts[s][index])
+        parts.append(f"<g><title>{_esc(title)}</title>")
+        running = 0
+        for status in STATUS_ORDER:
+            count = counts[status][index]
+            if not count:
+                continue
+            y_top, y_bottom = y_of(running + count), y_of(running)
+            parts.append(f'<rect x="{x_of(lo) + 0.5:.1f}" y="{y_top:.1f}" '
+                         f'width="{width:.1f}" height="{y_bottom - y_top:.1f}" '
+                         f'fill="{STATUS_COLOURS[status]}"/>')
+            running += count
+        parts.append("</g>")
+    if marker:
+        parts.append(_marker(x_of(marker[0]), marker[1]))
+    parts.append("</svg>")
+    return f'<div class="scroll">{"".join(parts)}</div>'
+
+
+def render_survival(steps, censored, t_end, xmax, ticks, marker=None):
+    """The Kaplan-Meier step curve, with a tick per censored job, drawn up to
+    the largest observed runtime t_end."""
+    plot_w = _PLOT_W - _PLOT_L - _PLOT_R
+    plot_h = _PLOT_H - _PLOT_T - _PLOT_B
+    def x_of(value):
+        return _PLOT_L + value / xmax * plot_w
+    def y_of(fraction):
+        return _PLOT_T + plot_h - fraction * plot_h
+
+    parts = [_svg_open(), _y_axis(["0%", "50%", "100%"]), _x_axis(ticks, x_of)]
+    points = []
+    def add(x, y):
+        point = (round(x, 1), round(y, 1))
+        if not points or points[-1] != point:
+            points.append(point)
+    previous = 1.0
+    for t, s in steps:
+        add(x_of(t), y_of(previous))
+        add(x_of(t), y_of(s))
+        previous = s
+    add(x_of(t_end), y_of(previous))
+    path = " ".join(f"{x},{y}" for x, y in points)
+    parts.append(f'<polyline points="{path}" fill="none" stroke="{MINE_COLOUR}" '
+                 f'stroke-width="2" stroke-linejoin="round"/>')
+    seen = set()
+    for t, s, status in censored:
+        mark = (round(x_of(t), 1), round(y_of(s), 1), status)
+        if mark in seen:
+            continue
+        seen.add(mark)
+        x, y, _ = mark
+        parts.append(f'<line x1="{x}" y1="{y - 5}" x2="{x}" y2="{y + 5}" '
+                     f'stroke="{STATUS_COLOURS[status]}" stroke-width="1.2" opacity=".8"/>')
+    if marker:
+        parts.append(_marker(x_of(marker[0]), marker[1]))
+    parts.append("</svg>")
+    return f'<div class="scroll">{"".join(parts)}</div>'
+
+
+def _survival_legend(steps, censored):
+    """The line, the tick colours in use, and when half and 90% of jobs were done."""
+    items = [f'<span class="lg"><i style="background:{MINE_COLOUR}"></i>not yet completed</span>']
+    for status in STATUS_ORDER:
+        if any(s == status for _, _, s in censored):
+            items.append(f'<span class="lg"><b style="background:{STATUS_COLOURS[status]};'
+                         f'width:2px;height:12px"></b>censored: {status}</span>')
+    reached = []
+    for share, level in (("50%", 0.5), ("90%", 0.1)):
+        t = _reached(steps, level)
+        reached.append(f"{share} of jobs completed within {_hms(t)}" if t is not None
+                       else f"{share} of jobs completed: not reached")
+    return (f'<div class="legend">{"".join(items)}</div>'
+            f'<div class="legend">{" &middot; ".join(reached)}</div>')
+
+
+def render_time_split(waiting, completed, lost):
+    """One stacked bar of the cluster's total time, in three segments."""
+    segments = [("waiting in queue", waiting, WAIT_COLOUR),
+                ("running, completed", completed, STATUS_COLOURS["COMPLETE"]),
+                ("running, lost", lost, STATUS_COLOURS["TIMEOUT"])]
+    total = sum(value for _, value, _ in segments) or 1
+    bar = "".join(
+        f'<span style="width:{100 * value / total:.2f}%;background:{colour}" '
+        f'title="{_esc(name)}: {value / 3600:.1f} h"></span>'
+        for name, value, colour in segments if value > 0)
+    legend = "".join(
+        f'<span class="lg"><b style="background:{colour}"></b>{_esc(name)}: '
+        f"{value / 3600:.1f} h ({100 * value / total:.0f}%)</span>"
+        for name, value, colour in segments)
+    return (f'<div class="stack">{bar}</div><div class="legend">{legend}</div>'
+            '<div class="legend">A restarted job&rsquo;s waiting time includes its '
+            "earlier attempts.</div>")
+
+
+def render_runtime_stats(timings):
+    """N, mean and sample standard deviation of every timing quantity."""
+    def present(values):
+        return [v for v in values if v is not None]
+    rows = [
+        ("Runtime (TOTALTIME), all jobs", present(t.totaltime for t in timings), _hms),
+        ("Runtime (TOTALTIME), COMPLETE jobs only",
+         present(t.totaltime for t in timings if t.status == "COMPLETE"), _hms),
+        ("Wait in queue (WAITTIME)", present(t.waittime for t in timings), _hms),
+        ("CPU time (CPUTIME)", present(t.cputime for t in timings), _hms),
+        ("CPU efficiency", present(t.efficiency for t in timings),
+         lambda v: f"{100 * v:.1f}%"),
+    ]
+    out = ["<tr><th></th><th class='num'>N</th><th class='num'>Mean</th>"
+           "<th class='num'>Std</th></tr>"]
+    for label, values, fmt in rows:
+        n, mean, std = _mean_std(values)
+        out.append(f"<tr><td>{_esc(label)}</td><td class='num'>{n}</td>"
+                   f"<td class='num'>{fmt(mean) if mean is not None else '&ndash;'}</td>"
+                   f"<td class='num'>{fmt(std) if std is not None else '&ndash;'}</td></tr>")
+    return _table(out)
+
+
+def render_runtime(summary):
+    """The Runtime section of a cluster page, or "" when no job reported timing."""
+    timings = summary.timings
+    if not timings:
+        return ""
+    total = summary.done
+    parts = ["<h2>Runtime</h2>"]
+
+    limits = [t.wall_limit for t in timings if t.wall_limit is not None]
+    limit = _mode(limits) if limits else None
+    timed = [t for t in timings if t.totaltime is not None]
+    if timed:
+        xmax = max(max(t.totaltime for t in timed), limit or 0, 1)
+        ticks = _ticks(xmax, _TIME_STEPS, _hm, 86400)
+        marker = (limit, f"limit {_hm(limit)}") if limit else None
+        counts = _histogram([(t.totaltime, t.status) for t in timed], xmax, HIST_BINS)
+        steps, censored = survival([(t.totaltime, t.status) for t in timed])
+        parts += [
+            '<p class="sub">Runtime of every finished job (h:mm), stacked by final '
+            "status. The dashed line is the wall time limit."
+            f"{_basis(len(timed), total)}</p>",
+            '<div class="card">',
+            render_histogram(counts, xmax, ticks, marker, _hm),
+            _status_legend({s: sum(counts[s]) for s in STATUS_ORDER}),
+            "</div>",
+            '<p class="sub">Fraction of jobs not yet completed after a given runtime, '
+            "as a Kaplan&ndash;Meier estimate. A job that failed, timed out or was "
+            "removed is censored at its runtime (tick marks): it stopped before "
+            "completing, so its completion time is unknown and later. The completed "
+            "jobs alone would look too short whenever jobs hit the limit."
+            f"{_basis(len(timed), total)}</p>",
+            '<div class="card">',
+            render_survival(steps, censored, max(t.totaltime for t in timed), xmax,
+                            ticks, marker),
+            _survival_legend(steps, censored),
+            "</div>",
+        ]
+
+    waited = [t for t in timings if t.waittime is not None and t.totaltime is not None]
+    if waited:
+        parts += [
+            '<p class="sub">Where the time went, summed over jobs: waiting in the '
+            "queue, running to completion, and running without completing."
+            f"{_basis(len(waited), total)}</p>",
+            '<div class="card">',
+            render_time_split(sum(max(t.waittime, 0) for t in waited),
+                              sum(t.totaltime for t in waited if t.status == "COMPLETE"),
+                              sum(t.totaltime for t in waited if t.status != "COMPLETE")),
+            "</div>",
+        ]
+
+    efficient = [(100 * t.efficiency, t.status) for t in timings
+                 if t.efficiency is not None]
+    if efficient:
+        emax = max(100, 5 * math.ceil(max(e for e, _ in efficient) / 5))
+        counts = _histogram(efficient, emax, emax // 5)
+        parts += [
+            '<p class="sub">CPU efficiency per job: CPU time over runtime &times; '
+            "requested cores, in 5% bins. Above 100% a job used more cores than it "
+            f"requested.{_basis(len(efficient), total)}</p>",
+            '<div class="card">',
+            render_histogram(counts, emax, _ticks(emax, _PERCENT_STEPS, "{}%".format, 100),
+                             (100, "100%") if emax > 100 else None, "{:.0f}%".format),
+            _status_legend({s: sum(counts[s]) for s in STATUS_ORDER}),
+            "</div>",
+        ]
+
+    parts += [
+        '<p class="sub">Mean and sample standard deviation. The mean runtime ignores '
+        "the jobs that were cut off, so it is too low when jobs time out; the survival "
+        "curve is the unbiased view.</p>",
+        render_runtime_stats(timings),
+    ]
+    return "\n".join(parts)
+
+
 def render_index(selections, summaries, generated_at, queue_ok=True, history=None):
     """Render the dashboard index."""
     running = [s for s in selections if s.queue and s.queue.total > 0]
@@ -905,7 +1265,7 @@ def render_index(selections, summaries, generated_at, queue_ok=True, history=Non
 
     parts = ["<h1>HTCondor jobs overview</h1>",
              f'<p class="sub">{_esc(USERNAME)} on {_esc(SSH_HOST)}'
-             f' &middot Generated {_when(generated_at)}</p>\n']
+             f' &middot; Generated {_when(generated_at)}<span id="next"></span></p>\n']
 
     parts.append("<h2>Running now</h2>")
     if not queue_ok:
@@ -1000,26 +1360,50 @@ def render_cluster(selection, summary, log_name, generated_at):
         + f' &middot; <a href="{_esc(log_name)}">raw {_esc(log_name)}</a></p>',
     ]
 
+    parts.append(render_runtime(summary))
+
     if not summary.problems:
+        parts.append("<h2>Problems</h2>")
         parts.append('<p class="none">No failures or timeouts.</p>')
     else:
         parts.append(f"<h2>Problems ({len(summary.problems)})</h2>")
+        timed = any(e.totaltime is not None for e in summary.problems)
+        hosted = any(e.host for e in summary.problems)
         rows = ["<tr><th>Job</th><th>Status</th><th class='num'>Events</th>"
-                "<th>Detail</th><th>Directory</th></tr>"]
+                + ("<th class='num'>Runtime</th>" if timed else "")
+                + "<th>Detail</th>" + ("<th>Host</th>" if hosted else "")
+                + "<th>Directory</th></tr>"]
         for entry in summary.problems:
             css = "bad" if entry.status == "FAILED" else "warn"
             if entry.status == "TIMEOUT":
                 detail = f"wall limit {_esc(entry.detail)}s"
             elif entry.status == "FAILED":
                 detail = f"exit {_esc(entry.detail)}"
-            else: detail = _esc("")
+            else:
+                detail = ""
+            if entry.seed:
+                detail += f'<div class="path">seed {_esc(entry.seed)}</div>'
+            runtime = _hms(entry.totaltime) if entry.totaltime is not None else ""
             rows.append(
                 f"<tr><td>{_esc(entry.cluster)}.{_esc(entry.proc)}</td>"
                 f"<td><span class='pill {css}'>{_esc(entry.status)}</span></td>"
-                f"<td class='num'>{_esc(entry.events)}</td><td>{detail}</td>"
-                f"<td class='path'>{_esc(entry.dir)}</td></tr>"
+                f"<td class='num'>{_esc(entry.events)}</td>"
+                + (f"<td class='num'>{runtime}</td>" if timed else "")
+                + f"<td>{detail}</td>"
+                + (f"<td>{_esc(entry.host)}</td>" if hosted else "")
+                + f"<td class='path'>{_esc(entry.dir)}</td></tr>"
             )
         parts.append(_table(rows))
+        if hosted:
+            by_host = {}
+            for entry in summary.problems:
+                if entry.host:
+                    by_host[entry.host] = by_host.get(entry.host, 0) + 1
+            ranked = sorted(by_host.items(), key=lambda item: (-item[1], item[0]))
+            parts.append('<p class="sub">By host: ' + ", ".join(
+                f"{_esc(host)} &times;{n}" for host, n in ranked[:10])
+                + (f", and {len(ranked) - 10} more" if len(ranked) > 10 else "")
+                + "</p>")
 
     forget = FORGET_COMMAND.format(cluster=selection.cluster)
     parts.append('<div class="cmds">'
@@ -1070,12 +1454,7 @@ def atomic_write(path, content):
 
 
 def prune(directory, keep):
-    """Delete generated files no longer wanted. Leaves unrelated files alone.
-
-    Sweeps the top level and the cluster subfolder, matching `keep` against the
-    path relative to OUT_DIR. Sweeping the top level still matters after the move
-    to a subfolder: it is what clears out pages left by the old flat layout.
-    """
+    """Delete generated files no longer wanted. Leaves unrelated files alone."""
     for sub in ("", CLUSTER_DIR):
         folder = os.path.join(directory, sub)
         if not os.path.isdir(folder):
@@ -1197,19 +1576,27 @@ def summary_to_dict(summary):
         "done": summary.done, "ok": summary.ok, "failed": summary.failed,
         "timeout": summary.timeout, "removed": summary.removed,
         "unparsed": summary.unparsed, "restarted": summary.restarted,
-        "problems": [[p.status, p.cluster, p.proc, p.dir, p.events, p.detail]
-                     for p in summary.problems],
+        "problems": [list(astuple(p)) for p in summary.problems],
+        "timings": [list(astuple(t)) for t in summary.timings],
     }
 
 
 def summary_from_dict(data):
+    """Rebuild a summary from the cache."""
     summary = OverviewSummary(
         done=data.get("done", 0), ok=data.get("ok", 0), failed=data.get("failed", 0),
         timeout=data.get("timeout", 0), removed=data.get("removed", 0),
         unparsed=data.get("unparsed", 0), restarted=data.get("restarted", 0),
     )
     summary.problems = [Entry(*p) for p in data.get("problems", [])]
+    summary.timings = [JobTiming(*t) for t in data.get("timings", [])]
     return summary
+
+
+def cached(record, mtime):
+    """Whether a cluster's cached summary can be reused: the log has not changed
+    since it was parsed."""
+    return (record.get("mtime") == mtime)
 
 
 # ---------------------------------------------------------------- main
@@ -1235,7 +1622,7 @@ def main():
 
         stale = [inventory[s.cluster].path for s in selections
                  if s.cluster in inventory
-                 and clusters.get(s.cluster, {}).get("mtime") != inventory[s.cluster].mtime]
+                 and not cached(clusters.get(s.cluster, {}), inventory[s.cluster].mtime)]
         fetched = fetch_logs(stale)
 
         summaries, raw_logs = {}, {}

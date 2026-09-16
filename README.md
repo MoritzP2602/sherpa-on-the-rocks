@@ -192,7 +192,7 @@ condor_ssh_to_job <job-id>
 cat $TMPDIR/job.<job-id>.out
 ```
 
-Once a job is finished, the .out, .err and .log files are stored in `condor_output` (e.g. `job.<job-id>.out`). A summary of all finished jobs can be found in `condor_output/overview.<cluster>.log`, including the final status of each job (COMPLETE, TIMEOUT or FAILED).
+Once a job is finished, the .out, .err and .log files are stored in `condor_output` (e.g. `job.<job-id>.out`). A summary of all finished jobs can be found in `condor_output/overview.<cluster>.log`, including the final status of each job (COMPLETE, TIMEOUT or FAILED), its runtime, time spent waiting in the queue, CPU time, wall time limit and the node it ran on.
 
 
 ## 3. Merging YODA output
@@ -237,7 +237,7 @@ Note: If you changed the condor output directory, you need to adjust the directo
 
 ## 5. Monitoring jobs on your webpage
 
-Instead of logging into the cluster to run `condor_q`, you can publish an overview of your jobs on your institute webpage: which clusters are running now, and what completed, failed or timed out over the last week.
+Instead of logging into the cluster to run `condor_q`, you can publish an overview of your jobs on your institute webpage: which clusters are running now, and what completed, failed or timed out over the last week. Each cluster page also plots the runtimes, queue waits and CPU efficiency of its jobs.
 
 It reads the `overview.<cluster>.log` files, so it only covers jobs submitted with the scripts in this repository. A timer on an always-on institute host refreshes it every five minutes.
 

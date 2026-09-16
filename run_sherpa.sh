@@ -73,6 +73,35 @@ print_end_time() {
   printf "Total elapsed time: %d-%02d:%02d:%02d\n" "$days" "$hours" "$minutes" "$seconds"
 }
 
+log_fields() {
+  local cpu host times_file="$TMPDIR/times.${CLUSTER}.${PROCESS}"
+  FIELDS="DIR: $OUTDIR"
+  if [ -n "$1" ]; then
+    FIELDS="$FIELDS | EVENTS: $1"
+  fi
+  if [ -n "$start_epoch" ]; then
+    FIELDS="$FIELDS | TOTALTIME: $(( $(date +%s) - start_epoch ))"
+    if [ -n "$qdate" ]; then
+      FIELDS="$FIELDS | WAITTIME: $(( start_epoch - qdate ))"
+    fi
+  fi
+  if [ -n "$WALL_TIME_LIMIT" ]; then
+    FIELDS="$FIELDS | WALLTIME_LIMIT: $WALL_TIME_LIMIT"
+  fi
+  times >"$times_file"
+  cpu=$(awk 'NR == 2 { for (i = 1; i <= 2; i++) { split($i, t, /[ms]/); s += t[1] * 60 + t[2] }; printf "%d", s + 0.5 }' "$times_file")
+  if [ -n "$cpu" ]; then
+    FIELDS="$FIELDS | CPUTIME: $cpu"
+  fi
+  host=$(hostname -s 2>/dev/null || true)
+  if [ -n "$host" ]; then
+    FIELDS="$FIELDS | HOST: $host"
+  fi
+  if [ -n "$SEED" ]; then
+    FIELDS="$FIELDS | SEED: $SEED"
+  fi
+}
+
 OUTDIR=""
 YODA=""
 cleanup() {
@@ -112,9 +141,10 @@ term_handler() {
   print_end_time
   echo ""
   echo "Copying output files back to shared filesystem..."
+  log_fields "$last_event"
   {
     flock -x 200
-    printf "[REMOVED] ${CLUSTER}.${PROCESS} | DIR: %s | EVENTS: %s | Job was removed/terminated externally!\n" "$OUTDIR" "$last_event" >&200
+    printf "[REMOVED] ${CLUSTER}.${PROCESS} | %s | Job was removed/terminated externally!\n" "$FIELDS" >&200
   } 200>>"$STATUS_LOG"
   exit 143
 }
@@ -123,6 +153,7 @@ trap term_handler SIGTERM SIGINT SIGQUIT
 
 # Record the start time
 start_epoch=$(date +%s)
+qdate=$(awk '$1 == "QDate" {print $3}' "${_CONDOR_JOB_AD:-/dev/null}" 2>/dev/null || true)
 start_time=$(date '+%Y-%m-%d %H:%M:%S')
 echo "Job ${CLUSTER}.${PROCESS} started on $(hostname) at: $start_time"
 echo ""
@@ -239,10 +270,10 @@ timeout --foreground -s INT -k 60 "$TIMEOUT" "$SHERPA" -f "$YAML" -R "$SEED" &
 sherpa_pid=$!
 exit_code=0
 wait "$sherpa_pid" || exit_code=$?
+last_event=$(get_last_event_count)
 
 if [ $exit_code -ne 0 ]; then
   sherpa_elapsed=$(( $(date +%s) - sherpa_start_epoch ))
-  last_event=$(get_last_event_count)
   echo ""
   if { [ $exit_code -eq 124 ] || [ $exit_code -eq 137 ] || [ $exit_code -eq 130 ]; } && [ $sherpa_elapsed -ge $TIMEOUT ]; then
     echo "SHERPA was terminated after reaching the time limit of $TIMEOUT seconds!"
@@ -251,9 +282,10 @@ if [ $exit_code -ne 0 ]; then
     print_end_time
     echo ""
     echo "Copying output files back to shared filesystem..."
+    log_fields "$last_event"
     {
       flock -x 200
-      printf "[TIMEOUT] ${CLUSTER}.${PROCESS} | DIR: %s | EVENTS: %s | Hit wall time limit of %s seconds!\n" "$OUTDIR" "$last_event" "$TIMEOUT" >&200
+      printf "[TIMEOUT] ${CLUSTER}.${PROCESS} | %s | Hit wall time limit of %s seconds!\n" "$FIELDS" "$TIMEOUT" >&200
     } 200>>"$STATUS_LOG"
     exit 0
   else
@@ -266,9 +298,10 @@ if [ $exit_code -ne 0 ]; then
     print_end_time
     echo ""
     echo "Copying output files back to shared filesystem..."
+    log_fields "$last_event"
     {
       flock -x 200
-      printf "[FAILED] ${CLUSTER}.${PROCESS} | DIR: %s | EVENTS: %s | Exit code: %s\n" "$OUTDIR" "$last_event" "$exit_reason" >&200
+      printf "[FAILED] ${CLUSTER}.${PROCESS} | %s | Exit code: %s\n" "$FIELDS" "$exit_reason" >&200
     } 200>>"$STATUS_LOG"
     exit $exit_code
   fi
@@ -280,7 +313,8 @@ echo ""
 print_end_time
 echo ""
 echo "Copying output files back to shared filesystem..."
+log_fields "$last_event"
 {
   flock -x 200
-  printf "[COMPLETE] ${CLUSTER}.${PROCESS} | DIR: %s \n" "$OUTDIR" >&200
+  printf "[COMPLETE] ${CLUSTER}.${PROCESS} | %s\n" "$FIELDS" >&200
 } 200>>"$STATUS_LOG"

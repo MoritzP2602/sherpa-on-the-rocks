@@ -174,6 +174,8 @@ You should see this, with one pair of files under `clusters/` per recent cluster
 
 The pages regenerate every five minutes on their own. Each page carries the time
 it was generated, and shows a warning banner if it is more than 30 minutes old.
+If you change the timer's `OnCalendar` step, set `REFRESH_MINUTES` in
+`generate.py` to match, so the countdown on the index page stays right.
 
 ```bash
 ~/sherpa-on-the-rocks/condor-dashboard/generate.py         # refresh now
