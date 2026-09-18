@@ -81,17 +81,17 @@ log_fields() {
   fi
   if [ -n "$start_epoch" ]; then
     FIELDS="$FIELDS | TOTALTIME: $(( $(date +%s) - start_epoch ))"
-    if [ -n "$qdate" ]; then
-      FIELDS="$FIELDS | WAITTIME: $(( start_epoch - qdate ))"
-    fi
-  fi
-  if [ -n "$WALL_TIME_LIMIT" ]; then
-    FIELDS="$FIELDS | WALLTIME_LIMIT: $WALL_TIME_LIMIT"
   fi
   times >"$times_file"
   cpu=$(awk 'NR == 2 { for (i = 1; i <= 2; i++) { split($i, t, /[ms]/); s += t[1] * 60 + t[2] }; printf "%d", s + 0.5 }' "$times_file")
   if [ -n "$cpu" ]; then
     FIELDS="$FIELDS | CPUTIME: $cpu"
+  fi
+  if [ -n "$start_epoch" ] && [ -n "$qdate" ]; then
+    FIELDS="$FIELDS | WAITTIME: $(( start_epoch - qdate ))"
+  fi
+  if [ -n "$WALL_TIME_LIMIT" ]; then
+    FIELDS="$FIELDS | WALLTIME_LIMIT: $WALL_TIME_LIMIT"
   fi
   host=$(hostname -s 2>/dev/null || true)
   if [ -n "$host" ]; then

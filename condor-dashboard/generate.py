@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import getpass
 import html
-import itertools
 import json
 import math
 import os
@@ -920,6 +919,8 @@ STATUS_COLOURS = {"COMPLETE": "#1b7a43", "FAILED": "#b3261e",
                   "TIMEOUT": "#9a5b00", "REMOVED": "#d9a24a"}
 WAIT_COLOUR = "#aeb6be"
 HIST_BINS = 40
+BAR_GAP = 0.15
+BAR_RADIUS = 3
 _TIME_STEPS = [60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200,
                86400, 172800, 345600, 604800]
 _PERCENT_STEPS = [25, 50, 100, 200, 500]
@@ -976,29 +977,6 @@ def _histogram(values, xmax, bins):
     return counts
 
 
-def survival(jobs):
-    """Kaplan-Meier estimate of the fraction of jobs not yet complete."""
-    steps, censored = [(0, 1.0)], []
-    s, at_risk = 1.0, len(jobs)
-    for t, group in itertools.groupby(sorted(jobs), key=lambda job: job[0]):
-        group = list(group)
-        done = sum(1 for _, status in group if status == "COMPLETE")
-        if done:
-            s *= 1 - done / at_risk
-            steps.append((t, s))
-        censored.extend((t, s, status) for _, status in group if status != "COMPLETE")
-        at_risk -= len(group)
-    return steps, censored
-
-
-def _reached(steps, level):
-    """The first runtime at which S drops to `level`, or None."""
-    for t, s in steps:
-        if s <= level + 1e-9:
-            return t
-    return None
-
-
 def _svg_open():
     return (f'<svg class="chart" style="min-width:{_PLOT_W}px" '
             f'viewBox="0 0 {_PLOT_W} {_PLOT_H}" role="img" preserveAspectRatio="none">')
@@ -1044,6 +1022,14 @@ def _status_legend(counts):
         for s, n in counts.items() if n) + "</div>"
 
 
+def _rounded_top(x, y, w, h, radius):
+    """Path for a rectangle whose top two corners are rounded."""
+    r = min(radius, w / 2, h)
+    return (f"M{x:.1f},{y + h:.1f}V{y + r:.1f}Q{x:.1f},{y:.1f} {x + r:.1f},{y:.1f}"
+            f"H{x + w - r:.1f}Q{x + w:.1f},{y:.1f} {x + w:.1f},{y + r:.1f}"
+            f"V{y + h:.1f}Z")
+
+
 def render_histogram(counts, xmax, ticks, marker=None, fmt=str):
     """A stacked-bar SVG histogram in the style of render_chart."""
     bins = len(next(iter(counts.values())))
@@ -1059,7 +1045,8 @@ def render_histogram(counts, xmax, ticks, marker=None, fmt=str):
 
     parts = [_svg_open(), _y_axis([str(int(top * f)) for f in (0, 0.5, 1)]),
              _x_axis(ticks, x_of)]
-    width = max(plot_w / bins - 1, 1)
+    slot = plot_w / bins
+    width = max(slot * (1 - BAR_GAP), 1)
     for index in range(bins):
         if not totals[index]:
             continue
@@ -1067,77 +1054,24 @@ def render_histogram(counts, xmax, ticks, marker=None, fmt=str):
         title = f"{fmt(lo)} \u2013 {fmt(hi)}: " + ", ".join(
             f"{counts[s][index]} {s}" for s in STATUS_ORDER if counts[s][index])
         parts.append(f"<g><title>{_esc(title)}</title>")
+        x = x_of(lo) + (slot - width) / 2
+        stack = [(s, counts[s][index]) for s in STATUS_ORDER if counts[s][index]]
         running = 0
-        for status in STATUS_ORDER:
-            count = counts[status][index]
-            if not count:
-                continue
+        for position, (status, count) in enumerate(stack):
             y_top, y_bottom = y_of(running + count), y_of(running)
-            parts.append(f'<rect x="{x_of(lo) + 0.5:.1f}" y="{y_top:.1f}" '
-                         f'width="{width:.1f}" height="{y_bottom - y_top:.1f}" '
-                         f'fill="{STATUS_COLOURS[status]}"/>')
+            if position == len(stack) - 1:
+                shape = (f'<path d="'
+                         f'{_rounded_top(x, y_top, width, y_bottom - y_top, BAR_RADIUS)}"')
+            else:
+                shape = (f'<rect x="{x:.1f}" y="{y_top:.1f}" width="{width:.1f}" '
+                         f'height="{y_bottom - y_top:.1f}"')
+            parts.append(f'{shape} fill="{STATUS_COLOURS[status]}"/>')
             running += count
         parts.append("</g>")
     if marker:
         parts.append(_marker(x_of(marker[0]), marker[1]))
     parts.append("</svg>")
     return f'<div class="scroll">{"".join(parts)}</div>'
-
-
-def render_survival(steps, censored, t_end, xmax, ticks, marker=None):
-    """The Kaplan-Meier step curve, with a tick per censored job, drawn up to
-    the largest observed runtime t_end."""
-    plot_w = _PLOT_W - _PLOT_L - _PLOT_R
-    plot_h = _PLOT_H - _PLOT_T - _PLOT_B
-    def x_of(value):
-        return _PLOT_L + value / xmax * plot_w
-    def y_of(fraction):
-        return _PLOT_T + plot_h - fraction * plot_h
-
-    parts = [_svg_open(), _y_axis(["0%", "50%", "100%"]), _x_axis(ticks, x_of)]
-    points = []
-    def add(x, y):
-        point = (round(x, 1), round(y, 1))
-        if not points or points[-1] != point:
-            points.append(point)
-    previous = 1.0
-    for t, s in steps:
-        add(x_of(t), y_of(previous))
-        add(x_of(t), y_of(s))
-        previous = s
-    add(x_of(t_end), y_of(previous))
-    path = " ".join(f"{x},{y}" for x, y in points)
-    parts.append(f'<polyline points="{path}" fill="none" stroke="{MINE_COLOUR}" '
-                 f'stroke-width="2" stroke-linejoin="round"/>')
-    seen = set()
-    for t, s, status in censored:
-        mark = (round(x_of(t), 1), round(y_of(s), 1), status)
-        if mark in seen:
-            continue
-        seen.add(mark)
-        x, y, _ = mark
-        parts.append(f'<line x1="{x}" y1="{y - 5}" x2="{x}" y2="{y + 5}" '
-                     f'stroke="{STATUS_COLOURS[status]}" stroke-width="1.2" opacity=".8"/>')
-    if marker:
-        parts.append(_marker(x_of(marker[0]), marker[1]))
-    parts.append("</svg>")
-    return f'<div class="scroll">{"".join(parts)}</div>'
-
-
-def _survival_legend(steps, censored):
-    """The line, the tick colours in use, and when half and 90% of jobs were done."""
-    items = [f'<span class="lg"><i style="background:{MINE_COLOUR}"></i>not yet completed</span>']
-    for status in STATUS_ORDER:
-        if any(s == status for _, _, s in censored):
-            items.append(f'<span class="lg"><b style="background:{STATUS_COLOURS[status]};'
-                         f'width:2px;height:12px"></b>censored: {status}</span>')
-    reached = []
-    for share, level in (("50%", 0.5), ("90%", 0.1)):
-        t = _reached(steps, level)
-        reached.append(f"{share} of jobs completed within {_hms(t)}" if t is not None
-                       else f"{share} of jobs completed: not reached")
-    return (f'<div class="legend">{"".join(items)}</div>'
-            f'<div class="legend">{" &middot; ".join(reached)}</div>')
 
 
 def render_time_split(waiting, completed, lost):
@@ -1164,13 +1098,13 @@ def render_runtime_stats(timings):
     def present(values):
         return [v for v in values if v is not None]
     rows = [
-        ("Runtime (TOTALTIME), all jobs", present(t.totaltime for t in timings), _hms),
-        ("Runtime (TOTALTIME), COMPLETE jobs only",
+        ("Runtime, all jobs", present(t.totaltime for t in timings), _hms),
+        ("Runtime, COMPLETE jobs only",
          present(t.totaltime for t in timings if t.status == "COMPLETE"), _hms),
-        ("Wait in queue (WAITTIME)", present(t.waittime for t in timings), _hms),
-        ("CPU time (CPUTIME)", present(t.cputime for t in timings), _hms),
+        ("CPU time", present(t.cputime for t in timings), _hms),
         ("CPU efficiency", present(t.efficiency for t in timings),
          lambda v: f"{100 * v:.1f}%"),
+        ("Wait in queue", present(t.waittime for t in timings), _hms),
     ]
     out = ["<tr><th></th><th class='num'>N</th><th class='num'>Mean</th>"
            "<th class='num'>Std</th></tr>"]
@@ -1198,7 +1132,6 @@ def render_runtime(summary):
         ticks = _ticks(xmax, _TIME_STEPS, _hm, 86400)
         marker = (limit, f"limit {_hm(limit)}") if limit else None
         counts = _histogram([(t.totaltime, t.status) for t in timed], xmax, HIST_BINS)
-        steps, censored = survival([(t.totaltime, t.status) for t in timed])
         parts += [
             '<p class="sub">Runtime of every finished job (h:mm), stacked by final '
             "status. The dashed line is the wall time limit."
@@ -1206,17 +1139,6 @@ def render_runtime(summary):
             '<div class="card">',
             render_histogram(counts, xmax, ticks, marker, _hm),
             _status_legend({s: sum(counts[s]) for s in STATUS_ORDER}),
-            "</div>",
-            '<p class="sub">Fraction of jobs not yet completed after a given runtime, '
-            "as a Kaplan&ndash;Meier estimate. A job that failed, timed out or was "
-            "removed is censored at its runtime (tick marks): it stopped before "
-            "completing, so its completion time is unknown and later. The completed "
-            "jobs alone would look too short whenever jobs hit the limit."
-            f"{_basis(len(timed), total)}</p>",
-            '<div class="card">',
-            render_survival(steps, censored, max(t.totaltime for t in timed), xmax,
-                            ticks, marker),
-            _survival_legend(steps, censored),
             "</div>",
         ]
 
@@ -1251,8 +1173,7 @@ def render_runtime(summary):
 
     parts += [
         '<p class="sub">Mean and sample standard deviation. The mean runtime ignores '
-        "the jobs that were cut off, so it is too low when jobs time out; the survival "
-        "curve is the unbiased view.</p>",
+        "the jobs that were cut off, so it is too low when jobs time out.</p>",
         render_runtime_stats(timings),
     ]
     return "\n".join(parts)
