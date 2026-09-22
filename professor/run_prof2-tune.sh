@@ -102,6 +102,7 @@ cleanup() {
   cp -f "$OUTFILE" "$LOGDIR/job.${CLUSTER}.${PROCESS}.out" 2>/dev/null || true
   cp -f "$ERRFILE" "$LOGDIR/job.${CLUSTER}.${PROCESS}.err" 2>/dev/null || true
 }
+
 term_handler() {
   echo "Received termination signal. Forwarding SIGINT to prof2-tune..."
 

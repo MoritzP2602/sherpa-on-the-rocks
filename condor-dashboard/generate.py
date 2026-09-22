@@ -18,13 +18,12 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import uuid
 from dataclasses import astuple, dataclass, field
 from datetime import datetime, timedelta, timezone
 
 def _tilde(path):
-    """Shorten a leading home directory to ~, so the commands shown on the
-    generated pages stay short and readable.
-    """
+    """Shorten a leading home directory to ~."""
     path = os.path.abspath(path)
     home = os.path.expanduser("~")
     for candidate in (home, os.path.realpath(home)):
@@ -246,8 +245,7 @@ def parse_overview(text):
     """Summarise a whole overview log. Never raises on malformed content."""
     summary = OverviewSummary()
     latest = {}
-    order = []
-    for line in text.splitlines():
+    for index, line in enumerate(text.splitlines()):
         if not line.strip():
             continue
         entry = parse_overview_line(line)
@@ -256,15 +254,12 @@ def parse_overview(text):
             continue
         key = (entry.cluster, entry.proc)
         previous = latest.get(key)
-        if previous is None:
-            order.append(key)
-        else:
+        if previous is not None:
             summary.restarted += 1
-            if entry.status == "REMOVED" and previous.status != "REMOVED":
+            if entry.status == "REMOVED" and previous[1].status != "REMOVED":
                 continue
-        latest[key] = entry
-    for key in order:
-        entry = latest[key]
+        latest[key] = (index, entry)
+    for _, entry in sorted(latest.values(), key=lambda item: item[0]):
         summary.done += 1
         counter = _COUNTER[entry.status]
         setattr(summary, counter, getattr(summary, counter) + 1)
@@ -460,6 +455,7 @@ tr:hover td{background:#f7fafd}
 a{color:#1565c0;text-decoration:none}a:hover{text-decoration:underline}
 .num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 .path{color:#8a949e;font-size:.86em;word-break:break-all}
+.seed{word-break:normal;white-space:nowrap}
 .pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:.8em;font-weight:600}
 .run{background:#e3f2ea;color:#1b7a43}.idle{background:#eef1f4;color:#667}
 .bad{background:#fdecea;color:#b3261e}.warn{background:#fff4e5;color:#9a5b00}
@@ -581,9 +577,7 @@ COUNTERS = [("done", "idle"), ("ok", "run"), ("timeout", "warn"),
 
 
 def _count(value, css):
-    """A count as a coloured pill. Zero stays neutral grey whatever the column,
-    so an empty failure column does not read as an alarm from across the room.
-    """
+    """A count as a coloured pill."""
     return f"<span class='pill {css if value else 'zero'}'>{value}</span>"
 
 
@@ -599,9 +593,7 @@ def _table(rows):
 
 
 def _command(label, command):
-    """One click-to-copy command row: three grid items the .cmds grid aligns
-    into columns. The label needs its own element to be one of them.
-    """
+    """One click-to-copy command row."""
     return (f'<p class="cmd"><span>{_esc(label)}</span>'
             f"<code>{_esc(command)}</code>"
             f'<button class="copy" data-cmd="{_esc(command)}">copy</button></p>')
@@ -642,6 +634,17 @@ def parse_sample(text):
         fields = line.strip().split("\t")
         if len(fields) == 3 and all(f.isdigit() for f in fields):
             return tuple(int(f) for f in fields)
+    return None
+
+
+def parse_quota(text):
+    """Parse the #QUOTA section into (used, soft, hard) in 1K blocks, or None."""
+    for line in text.splitlines():
+        fields = line.split()
+        if len(fields) >= 3 and all(f.isdigit() for f in fields[:3]):
+            used, soft, hard = (int(f) for f in fields[:3])
+            if soft or hard:
+                return used, soft, hard
     return None
 
 
@@ -695,8 +698,7 @@ def _local(epoch):
 
 
 def day_window_start(now):
-    """The first bin edge of the daily chart: 24 hours before the bin `now`
-    falls in, so the whole axis slides forward with the clock."""
+    """The first bin edge of the daily chart."""
     edge = _local(now.timestamp()).replace(second=0, microsecond=0)
     edge -= timedelta(minutes=edge.minute % DAY_BIN_MINUTES)
     return edge - timedelta(hours=24)
@@ -786,11 +788,7 @@ def _nice_max(values):
 
 
 def _series_svg(values, colour, dashed, x_of, y_of):
-    """One series, broken into segments wherever bins have no data.
-
-    A lone sample surrounded by gaps has no line to draw, so it gets a dot --
-    otherwise the very first refresh of the day would render nothing at all.
-    """
+    """One series, broken into segments wherever bins have no data."""
     out, run = [], []
     dash = ' stroke-dasharray="5 4"' if dashed else ""
     for index, value in enumerate(values):
@@ -817,11 +815,7 @@ def _series_svg(values, colour, dashed, x_of, y_of):
 
 
 def render_chart(series, x_labels):
-    """A small multi-line SVG chart.
-
-    series is [(name, colour, dashed, values)]; every values list must be the
-    same length, one entry per bin, None where there is no data.
-    """
+    """A small multi-line SVG chart."""
     bins = len(series[0][3])
     plot_w = _PLOT_W - _PLOT_L - _PLOT_R
     plot_h = _PLOT_H - _PLOT_T - _PLOT_B
@@ -1048,25 +1042,34 @@ def render_histogram(counts, xmax, ticks, marker=None, fmt=str):
              _x_axis(ticks, x_of)]
     slot = plot_w / bins
     width = max(slot * (1 - BAR_GAP), 1)
+    clip_prefix = f"hist-{uuid.uuid4().hex}"
     for index in range(bins):
         if not totals[index]:
             continue
         lo, hi = index * xmax / bins, (index + 1) * xmax / bins
-        title = f"{fmt(lo)} \u2013 {fmt(hi)}: " + ", ".join(
+        title = f"{fmt(lo)} – {fmt(hi)}: " + ", ".join(
             f"{counts[s][index]} {s}" for s in STATUS_ORDER if counts[s][index])
-        parts.append(f"<g><title>{_esc(title)}</title>")
         x = x_of(lo) + (slot - width) / 2
-        stack = [(s, counts[s][index]) for s in STATUS_ORDER if counts[s][index]]
+        y_top = y_of(totals[index])
+        y_bottom = y_of(0)
+        clip_id = f"{clip_prefix}-{index}"
+        parts.append(
+            f'<defs><clipPath id="{clip_id}">'
+            f'<path d="{_rounded_top(x, y_top, width, y_bottom - y_top, BAR_RADIUS)}"/>'
+            f'</clipPath></defs>'
+            f'<g clip-path="url(#{clip_id})">'
+            f'<title>{_esc(title)}</title>')
         running = 0
-        for position, (status, count) in enumerate(stack):
-            y_top, y_bottom = y_of(running + count), y_of(running)
-            if position == len(stack) - 1:
-                shape = (f'<path d="'
-                         f'{_rounded_top(x, y_top, width, y_bottom - y_top, BAR_RADIUS)}"')
-            else:
-                shape = (f'<rect x="{x:.1f}" y="{y_top:.1f}" width="{width:.1f}" '
-                         f'height="{y_bottom - y_top:.1f}"')
-            parts.append(f'{shape} fill="{STATUS_COLOURS[status]}"/>')
+        for status in STATUS_ORDER:
+            count = counts[status][index]
+            if not count:
+                continue
+            y_top = y_of(running + count)
+            y_bottom = y_of(running)
+            parts.append(
+                f'<rect x="{x:.1f}" y="{y_top:.1f}" '
+                f'width="{width:.1f}" height="{y_bottom - y_top:.1f}" '
+                f'fill="{STATUS_COLOURS[status]}"/>')
             running += count
         parts.append("</g>")
     if marker:
@@ -1180,7 +1183,31 @@ def render_runtime(summary):
     return "\n".join(parts)
 
 
-def render_index(selections, summaries, generated_at, queue_ok=True, history=None):
+def _gib(blocks):
+    """1K blocks as GiB, the unit the quota is actually set in."""
+    return f"{blocks / 1048576:.0f} GiB"
+
+
+def render_quota(quota):
+    """Headroom on the shared home."""
+    parts = ["<h2>Home quota</h2>"]
+    if not quota:
+        parts.append('<p class="none">Unknown &mdash; could not read the quota.</p>')
+        return "\n".join(parts)
+    used, soft, hard = quota
+    limit = soft or hard
+    pct = 100 * used / limit if limit else 0
+    colour = "#1b7a43" if pct < 80 else "#b3261e"
+    parts.append(
+        f'<p class="sub">{_gib(used)} used of {_gib(soft)} soft, {_gib(hard)} hard '
+        f'&middot; {_gib(max(limit - used, 0))} left before the soft limit ({pct:.0f}% used).</p>'
+        f'<div class="bar" style="max-width:none">'
+        f'<span style="width:{min(pct, 100):.1f}%;background:{colour}"></span></div>')
+    return "\n".join(parts)
+
+
+def render_index(selections, summaries, generated_at, queue_ok=True, history=None,
+                 quota=None):
     """Render the dashboard index."""
     running = [s for s in selections if s.queue and s.queue.total > 0]
     finished = [s for s in selections if not (s.queue and s.queue.total > 0)]
@@ -1265,6 +1292,7 @@ def render_index(selections, summaries, generated_at, queue_ok=True, history=Non
     )
 
     parts.append(render_load_charts(history or [], generated_at))
+    parts.append(render_quota(quota))
 
     return _page("HTCondor jobs overview", "\n".join(parts), generated_at)
 
@@ -1306,7 +1334,7 @@ def render_cluster(selection, summary, log_name, generated_at):
             if entry.copyfail:
                 detail += f'<div class="path">copy failed: {_esc(entry.copyfail)}</div>'
             if entry.seed:
-                detail += f'<div class="path">seed {_esc(entry.seed)}</div>'
+                detail += f'<div class="path seed">seed {_esc(entry.seed)}</div>'
             runtime = _hms(entry.totaltime) if entry.totaltime is not None else ""
             rows.append(
                 f"<tr><td>{_esc(entry.cluster)}.{_esc(entry.proc)}</td>"
@@ -1318,17 +1346,6 @@ def render_cluster(selection, summary, log_name, generated_at):
                 + f"<td class='path'>{_esc(entry.dir)}</td></tr>"
             )
         parts.append(_table(rows))
-        if hosted:
-            by_host = {}
-            for entry in summary.problems:
-                if entry.host and not entry.copyfail:
-                    by_host[entry.host] = by_host.get(entry.host, 0) + 1
-            ranked = sorted(by_host.items(), key=lambda item: (-item[1], item[0]))
-            if by_host:
-                parts.append('<p class="sub">By host: ' + ", ".join(
-                    f"{_esc(host)} &times;{n}" for host, n in ranked[:10])
-                    + (f", and {len(ranked) - 10} more" if len(ranked) > 10 else "")
-                    + "</p>")
 
     forget = FORGET_COMMAND.format(cluster=selection.cluster)
     parts.append('<div class="cmds">'
@@ -1339,10 +1356,10 @@ def render_cluster(selection, summary, log_name, generated_at):
 
 
 def build_pages(selections, summaries, raw_logs, generated_at, queue_ok=True,
-                history=None):
+                history=None, quota=None):
     """Produce {filename: content} for everything that should be written."""
     pages = {"index.html": render_index(selections, summaries, generated_at, queue_ok,
-                                        history)}
+                                        history, quota)}
     for sel in selections:
         summary = summaries.get(sel.cluster)
         if summary is None:
@@ -1423,16 +1440,14 @@ echo "#LOGS"
   fi
   if [ -n "${f:-}" ] && [ -f "$f" ]; then printf '%%s\t%%s\t%%s\n' "$cid" "$(stat -c %%Y "$f")" "$f"; fi
 done
+echo "#QUOTA"
+timeout 10 quota -p -w 2>/dev/null | awk '$2 ~ /^[0-9]+$/ {print $2, $3, $4; exit}' || true
 echo "#END"
 """
 
 
 def inventory_script():
-    """The one-round-trip inventory fetch, with its paths filled in.
-
-    A function rather than a formatted constant so adding a path cannot leave a
-    caller behind with a KeyError.
-    """
+    """The one-round-trip inventory fetch, with its paths filled in."""
     return _INVENTORY_SCRIPT % {"registry": REGISTRY_PATH}
 
 
@@ -1459,7 +1474,7 @@ def _section(text, name):
         return ""
     out = []
     for line in lines[start:]:
-        if line.startswith("#") and line[1:] in ("QUEUE", "REGISTRY", "SAMPLE", "LOGS", "END"):
+        if line.startswith("#") and line[1:] in ("QUEUE", "REGISTRY", "SAMPLE", "LOGS", "QUOTA", "END"):
             break
         out.append(line)
     return "\n".join(out)
@@ -1536,6 +1551,7 @@ def main():
 
     if ok:
         history = update_history(parse_sample(_section(output, "SAMPLE")))
+        quota = parse_quota(_section(output, "QUOTA"))
         queue = parse_condor_q(_section(output, "QUEUE"))
         registry = parse_registry(_section(output, "REGISTRY"))
         forgotten = load_forgotten()
@@ -1578,6 +1594,7 @@ def main():
             del clusters[gone]
     else:
         history = load_history()
+        quota = None
         selections, summaries, raw_logs = [], {}, {}
         for cluster, record in clusters.items():
             stamp = record.get("timestamp")
@@ -1589,8 +1606,9 @@ def main():
                 summaries[cluster] = summary_from_dict(record["summary"])
         selections.sort(key=lambda s: (s.timestamp is not None, s.timestamp), reverse=True)
 
-    pages = build_pages(selections, summaries, raw_logs, now, queue_ok=ok,
-                        history=history)
+    if quota is None:
+        quota = tuple(state["quota"]) if state.get("quota") else None
+    pages = build_pages(selections, summaries, raw_logs, now, queue_ok=ok, history=history, quota=quota)
     for name, content in pages.items():
         atomic_write(os.path.join(OUT_DIR, name), content)
 
@@ -1601,7 +1619,7 @@ def main():
             keep.add(os.path.join(CLUSTER_DIR, f"overview.{sel.cluster}.log"))
     prune(OUT_DIR, keep)
 
-    save_state({"clusters": clusters})
+    save_state({"clusters": clusters, "quota": list(quota) if quota else None})
     print ("[condor-dashboard] generated at %s" % datetime.now())
     return 0 if ok else 1
 
