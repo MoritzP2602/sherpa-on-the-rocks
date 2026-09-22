@@ -147,9 +147,9 @@ should_skip_yoda() {
     dir_name=$(basename "$dir")
 
     if [ "$EXACT_NAME" = true ]; then
-        [ -f "$dir/${dir_name}.yoda" ] || [ -f "$dir/${dir_name}.yoda.gz" ]
+        [ -s "$dir/${dir_name}.yoda" ] || [ -s "$dir/${dir_name}.yoda.gz" ]
     else
-        find "$dir" -maxdepth 1 -type f \( -name "*.yoda" -o -name "*.yoda.gz" \) | grep -q .
+        find "$dir" -maxdepth 1 -type f -size +0 \( -name "*.yoda" -o -name "*.yoda.gz" \) | grep -q .
     fi
 }
 

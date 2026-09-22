@@ -109,6 +109,7 @@ class Entry:
     nproc: int | None = None
     host: str | None = None
     seed: str | None = None
+    copyfail: str | None = None
 
 
 @dataclass
@@ -199,7 +200,7 @@ _COUNTER = {"COMPLETE": "ok", "FAILED": "failed", "TIMEOUT": "timeout",
 _FIELDS = {"DIR": "dir", "EVENTS": "events", "Exit code": "detail",
            "HOST": "host", "SEED": "seed", "TOTALTIME": "totaltime",
            "WAITTIME": "waittime", "WALLTIME_LIMIT": "wall_limit",
-           "CPUTIME": "cputime", "NPROC": "nproc"}
+           "CPUTIME": "cputime", "NPROC": "nproc", "COPY": "copyfail"}
 _INT_FIELDS = {"totaltime", "waittime", "wall_limit", "cputime", "nproc"}
 
 
@@ -1298,10 +1299,12 @@ def render_cluster(selection, summary, log_name, generated_at):
             css = "bad" if entry.status == "FAILED" else "warn"
             if entry.status == "TIMEOUT":
                 detail = f"wall limit {_esc(entry.detail)}s"
-            elif entry.status == "FAILED":
+            elif entry.status == "FAILED" and entry.detail:
                 detail = f"exit {_esc(entry.detail)}"
             else:
                 detail = ""
+            if entry.copyfail:
+                detail += f'<div class="path">copy failed: {_esc(entry.copyfail)}</div>'
             if entry.seed:
                 detail += f'<div class="path">seed {_esc(entry.seed)}</div>'
             runtime = _hms(entry.totaltime) if entry.totaltime is not None else ""
@@ -1318,13 +1321,14 @@ def render_cluster(selection, summary, log_name, generated_at):
         if hosted:
             by_host = {}
             for entry in summary.problems:
-                if entry.host:
+                if entry.host and not entry.copyfail:
                     by_host[entry.host] = by_host.get(entry.host, 0) + 1
             ranked = sorted(by_host.items(), key=lambda item: (-item[1], item[0]))
-            parts.append('<p class="sub">By host: ' + ", ".join(
-                f"{_esc(host)} &times;{n}" for host, n in ranked[:10])
-                + (f", and {len(ranked) - 10} more" if len(ranked) > 10 else "")
-                + "</p>")
+            if by_host:
+                parts.append('<p class="sub">By host: ' + ", ".join(
+                    f"{_esc(host)} &times;{n}" for host, n in ranked[:10])
+                    + (f", and {len(ranked) - 10} more" if len(ranked) > 10 else "")
+                    + "</p>")
 
     forget = FORGET_COMMAND.format(cluster=selection.cluster)
     parts.append('<div class="cmds">'

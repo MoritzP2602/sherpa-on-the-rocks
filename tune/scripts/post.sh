@@ -172,12 +172,17 @@ else
       N_TIMEOUT=$(printf '%s\n'  "$OUTCOMES" | grep -c '^\[TIMEOUT\]'  || true)
       N_FAILED=$(printf '%s\n'   "$OUTCOMES" | grep -c '^\[FAILED\]'   || true)
       N_REMOVED=$(printf '%s\n'  "$OUTCOMES" | grep -c '^\[REMOVED\]'  || true)
+      N_COPYFAIL=$(printf '%s\n' "$OUTCOMES" | grep -c ' COPY: ' || true)
       PROBLEM_LINES=$(printf '%s\n' "$OUTCOMES" | grep -E '^\[(TIMEOUT|FAILED|REMOVED)\]' || true)
       OUTPUT="Job summary:
   COMPLETE / TIMEOUT / FAILED / REMOVED : ${N_COMPLETE} / ${N_TIMEOUT} / ${N_FAILED} / ${N_REMOVED}
 "
       if [[ "$N_RESTARTED" -gt 0 ]]; then
         OUTPUT+="  ${N_RESTARTED} attempt(s) were restarted by HTCondor and are not counted above.
+"
+      fi
+      if [[ "$N_COPYFAIL" -gt 0 ]]; then
+        OUTPUT+="  ${N_COPYFAIL} job(s) ran but their results never reached the shared filesystem (check the home quota).
 "
       fi
       if [[ -n "$PROBLEM_LINES" ]]; then

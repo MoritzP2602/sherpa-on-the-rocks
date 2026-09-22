@@ -104,28 +104,80 @@ log_fields() {
 
 OUTDIR=""
 YODA=""
-cleanup() {
-  if [ -n "$OUTDIR" ] && [ -f "$TMPDIR/Analysis.yoda.gz" ] && [ -d "$OUTDIR" ]; then
-    if cp -f "$TMPDIR/Analysis.yoda.gz" "$OUTDIR/$YODA" 2>/dev/null; then
-      echo "Successfully copied Analysis.yoda.gz to $OUTDIR/$YODA"
+COPY_ERROR=""
+COPY_DONE=""
+STATUS_WRITTEN=""
+
+copy_results() {
+  local src="$TMPDIR/Analysis.yoda.gz" dst size before after err item
+  if [ -n "$COPY_DONE" ]; then
+    return 0
+  fi
+  COPY_DONE=1
+
+  if [ -n "$OUTDIR" ] && [ -d "$OUTDIR" ] && [ -f "$src" ]; then
+    dst="$OUTDIR/$YODA"
+    before=$(stat -c %Y:%s "$dst" 2>/dev/null || echo none)
+    if err=$(cp -f "$src" "$dst" 2>&1); then
+      err=""
+      size=$(stat -c %s "$src" 2>/dev/null || echo "")
+      if [ -n "$size" ]; then
+        if [ "$(stat -c %s "$dst" 2>/dev/null)" != "$size" ]; then
+          err="destination does not match source"
+        elif [ "$size" -le 536870912 ] && command -v gzip >/dev/null 2>&1; then
+          gzip -t "$dst" 2>/dev/null || err="destination is not a valid gzip file"
+        fi
+      fi
+    fi
+    if [ -n "$err" ]; then
+      after=$(stat -c %Y:%s "$dst" 2>/dev/null || echo none)
+      if [ "$after" != "$before" ]; then
+        rm -f "$dst" 2>/dev/null || true
+      fi
+      COPY_ERROR=$(printf '%s' "$err" | tr '\n|' '; ' | sed -E "s/^cp: [^']*'.*': //" | cut -c1-160)
+      if [ -z "$COPY_ERROR" ]; then
+        COPY_ERROR="copy failed"
+      fi
+      echo "ERROR: Failed to copy Analysis.yoda.gz to $dst: $COPY_ERROR"
     else
-      echo "Warning: Failed to copy Analysis.yoda.gz to $OUTDIR/$YODA"
+      echo "Successfully copied Analysis.yoda.gz to $dst"
     fi
   else
     echo "Warning: Analysis.yoda.gz not found in $TMPDIR"
   fi
 
   if [ -n "$OUTDIR" ] && [ -d "$OUTDIR" ]; then
-    for item in *.dat *_Histograms; do
+    for item in "$TMPDIR"/*.dat "$TMPDIR"/*_Histograms; do
       [ -e "$item" ] || continue
       if cp -r "$item" "$OUTDIR" 2>/dev/null; then
-        echo "Copied $item to $OUTDIR"
+        echo "Copied $(basename "$item") to $OUTDIR"
       else
-        echo "Warning: Failed to copy $item"
+        echo "Warning: Failed to copy $(basename "$item")"
       fi
     done
   fi
+  return 0
+}
 
+write_status() {
+  local copy=""
+  STATUS_WRITTEN=1
+  if [ -n "$COPY_ERROR" ]; then
+    copy=" | COPY: $COPY_ERROR"
+  fi
+  {
+    flock -x 200
+    printf '[%s] %s.%s | %s%s%s\n' "$1" "$CLUSTER" "$PROCESS" "$FIELDS" "$2" "$copy" >&200
+  } 200>>"$STATUS_LOG" || echo "ERROR: could not append status to $STATUS_LOG"
+}
+
+cleanup() {
+  local rc=$?
+  copy_results || true
+  if [ -z "$STATUS_WRITTEN" ] && [ -n "$STATUS_LOG" ]; then
+    log_fields "$last_event" || true
+    write_status FAILED " | Exit code: $rc | No status written before exit"
+  fi
   cp -f "$OUTFILE" "$LOGDIR/job.${CLUSTER}.${PROCESS}.out" 2>/dev/null || true
   cp -f "$ERRFILE" "$LOGDIR/job.${CLUSTER}.${PROCESS}.err" 2>/dev/null || true
 }
@@ -142,10 +194,7 @@ term_handler() {
   echo ""
   echo "Copying output files back to shared filesystem..."
   log_fields "$last_event"
-  {
-    flock -x 200
-    printf "[REMOVED] ${CLUSTER}.${PROCESS} | %s | Job was removed/terminated externally!\n" "$FIELDS" >&200
-  } 200>>"$STATUS_LOG"
+  write_status REMOVED " | Job was removed/terminated externally!"
   exit 143
 }
 trap cleanup EXIT
@@ -210,6 +259,7 @@ OUTDIR=$(realpath "$DIRECTORY")
 YODA_BASENAME=$(basename "$DIRECTORY")
 YODA="$YODA_BASENAME.yoda.gz"
 SEED=$(od -An -N4 -tu4 < /dev/urandom | tr -d ' ')
+QUOTA_INFO=$(timeout 10 quota -p -w 2>/dev/null | awk '$2 ~ /^[0-9]+$/ {printf "%.1f GiB used, soft %.1f GiB, hard %.1f GiB", $2/1048576, $3/1048576, $4/1048576; exit}' || true)
 
 echo "SHERPA              : $SHERPA"
 echo "INTEGRATION_RESULTS : $INTEGRATION_RESULTS"
@@ -219,6 +269,7 @@ echo "OUTDIR              : $OUTDIR"
 echo "LOGDIR              : $LOGDIR"
 echo "SEED                : $SEED"
 echo "MAXRUNTIME          : $MAXRUNTIME seconds"
+echo "QUOTA               : ${QUOTA_INFO:-unknown}"
 echo ""
 
 DESIRED_WALL_TIME_1=$((MAXRUNTIME * 3 / 2))
@@ -283,10 +334,8 @@ if [ $exit_code -ne 0 ]; then
     echo ""
     echo "Copying output files back to shared filesystem..."
     log_fields "$last_event"
-    {
-      flock -x 200
-      printf "[TIMEOUT] ${CLUSTER}.${PROCESS} | %s | Hit wall time limit of %s seconds!\n" "$FIELDS" "$TIMEOUT" >&200
-    } 200>>"$STATUS_LOG"
+    copy_results || true
+    write_status TIMEOUT " | Hit wall time limit of $TIMEOUT seconds!"
     exit 0
   else
     exit_reason="$exit_code"
@@ -299,10 +348,8 @@ if [ $exit_code -ne 0 ]; then
     echo ""
     echo "Copying output files back to shared filesystem..."
     log_fields "$last_event"
-    {
-      flock -x 200
-      printf "[FAILED] ${CLUSTER}.${PROCESS} | %s | Exit code: %s\n" "$FIELDS" "$exit_reason" >&200
-    } 200>>"$STATUS_LOG"
+    copy_results || true
+    write_status FAILED " | Exit code: $exit_reason"
     exit $exit_code
   fi
 fi
@@ -314,7 +361,9 @@ print_end_time
 echo ""
 echo "Copying output files back to shared filesystem..."
 log_fields "$last_event"
-{
-  flock -x 200
-  printf "[COMPLETE] ${CLUSTER}.${PROCESS} | %s\n" "$FIELDS" >&200
-} 200>>"$STATUS_LOG"
+copy_results || true
+if [ -n "$COPY_ERROR" ]; then
+  write_status FAILED ""
+else
+  write_status COMPLETE ""
+fi

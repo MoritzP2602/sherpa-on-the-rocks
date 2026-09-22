@@ -82,7 +82,27 @@ log_fields() {
 }
 
 FOLDER_LIST=""
+COPY_ERROR=""
+STATUS_WRITTEN=""
+
+write_status() {
+  local copy=""
+  STATUS_WRITTEN=1
+  if [ -n "$COPY_ERROR" ]; then
+    copy=" | COPY: $COPY_ERROR"
+  fi
+  {
+    flock -x 200
+    printf '[%s] %s.%s | %s%s%s\n' "$1" "$CLUSTER" "$PROCESS" "$FIELDS" "$2" "$copy" >&200
+  } 200>>"$STATUS_LOG" || echo "ERROR: could not append status to $STATUS_LOG"
+}
+
 cleanup() {
+  local rc=$?
+  if [ -z "$STATUS_WRITTEN" ] && [ -n "$STATUS_LOG" ]; then
+    log_fields || true
+    write_status FAILED " | Exit code: $rc | No status written before exit"
+  fi
   cp -f "$OUTFILE" "$LOGDIR/job.${CLUSTER}.${PROCESS}.out" 2>/dev/null || true
   cp -f "$ERRFILE" "$LOGDIR/job.${CLUSTER}.${PROCESS}.err" 2>/dev/null || true
 }
@@ -98,10 +118,7 @@ term_handler() {
   echo ""
   echo "Copying output files back to shared filesystem..."
   log_fields
-  {
-    flock -x 200
-    printf "[REMOVED] ${CLUSTER}.${PROCESS} | %s | Job was removed/terminated externally!\n" "$FIELDS" >&200
-  } 200>>"$STATUS_LOG"
+  write_status REMOVED " | Job was removed/terminated externally!"
   exit 143
 }
 trap cleanup EXIT
@@ -151,10 +168,7 @@ for folder in "${FOLDERS[@]}"; do
 done
 if [ "$missing" -ne 0 ]; then
   log_fields
-  {
-    flock -x 200
-    printf "[FAILED] ${CLUSTER}.${PROCESS} | %s | Missing inputs\n" "$FIELDS" >&200
-  } 200>>"$STATUS_LOG"
+  write_status FAILED " | Missing inputs"
   exit 1
 fi
 
@@ -221,10 +235,7 @@ if [ $exit_code -ne 0 ]; then
     print_end_time
     echo ""
     log_fields
-    {
-      flock -x 200
-      printf "[TIMEOUT] ${CLUSTER}.${PROCESS} | %s | Hit wall time limit of %s seconds!\n" "$FIELDS" "$TIMEOUT" >&200
-    } 200>>"$STATUS_LOG"
+    write_status TIMEOUT " | Hit wall time limit of $TIMEOUT seconds!"
     exit $exit_code
   else
     exit_reason="$exit_code"
@@ -236,10 +247,7 @@ if [ $exit_code -ne 0 ]; then
     print_end_time
     echo ""
     log_fields
-    {
-      flock -x 200
-      printf "[FAILED] ${CLUSTER}.${PROCESS} | %s | Exit code: %s\n" "$FIELDS" "$exit_reason" >&200
-    } 200>>"$STATUS_LOG"
+    write_status FAILED " | Exit code: $exit_reason"
     exit $exit_code
   fi
 fi
@@ -252,7 +260,4 @@ echo ""
 echo "Copying output files back to shared filesystem..."
 echo ""
 log_fields
-{
-  flock -x 200
-  printf "[COMPLETE] ${CLUSTER}.${PROCESS} | %s\n" "$FIELDS" >&200
-} 200>>"$STATUS_LOG"
+write_status COMPLETE ""
