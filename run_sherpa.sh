@@ -259,7 +259,19 @@ OUTDIR=$(realpath "$DIRECTORY")
 
 YODA_BASENAME=$(basename "$DIRECTORY")
 YODA="$YODA_BASENAME.yoda.gz"
-SEED=$(od -An -N4 -tu4 < /dev/urandom | tr -d ' ')
+SEEDS_FILE="$(dirname "$OUTDIR")/seeds.txt"
+if [ -f "$SEEDS_FILE" ]; then
+  RUN_NAME=$(basename "$OUTDIR")
+  SEED=$(awk -v run="$RUN_NAME" '$1 == run "" { print $2; exit }' "$SEEDS_FILE")
+  if ! [[ "$SEED" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: no seed for run directory $RUN_NAME in $SEEDS_FILE"
+    exit 1
+  fi
+  SEED_INFO="$SEED (from $SEEDS_FILE)"
+else
+  SEED=$(od -An -N4 -tu4 < /dev/urandom | tr -d ' ')
+  SEED_INFO="$SEED (generated randomly)"
+fi
 QUOTA_INFO=$(timeout 10 quota -p -w 2>/dev/null | awk '$2 ~ /^[0-9]+$/ {printf "%.1f GiB used, soft %.1f GiB, hard %.1f GiB", $2/1048576, $3/1048576, $4/1048576; exit}' || true)
 
 echo "SHERPA              : $SHERPA"
@@ -268,7 +280,7 @@ echo "YAML                : $YAML"
 echo "YODA                : $YODA"
 echo "OUTDIR              : $OUTDIR"
 echo "LOGDIR              : $LOGDIR"
-echo "SEED                : $SEED"
+echo "SEED                : $SEED_INFO"
 echo "MAXRUNTIME          : $MAXRUNTIME seconds"
 echo "QUOTA               : ${QUOTA_INFO:-unknown}"
 echo ""

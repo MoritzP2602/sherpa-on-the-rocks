@@ -14,10 +14,12 @@ if [ $# -lt 1 ]; then
     echo "  --init[=PATH] : Append the integration results directory to every line as a second"
     echo "                  field, so the job is told where to find it instead of searching."
     echo "                  Bare --init uses ./init; use --init=PATH for anywhere else."
+    echo "  --seeds       : Give every listed run directory a fixed random seed, as a line '<run directory> <seed>'"
+    echo "                  in the seeds.txt next to it."
     echo "  --quiet|-q    : Suppress messages about skipped and created subdirectories."
     echo "If nsubfolders is given and folder has subdirectories, creates subfolders in each and lists them in $OUTFILE."
     echo "If nsubfolders is given and folder has no subdirectories, creates subfolders directly in folder and lists them in $OUTFILE."
-    echo "If nsubfolders is not given, lists all subdirectories of folder in $OUTFILE."
+    echo "If nsubfolders is not given, lists all subdirectories of folder in $OUTFILE, or folder itself if it has none."
     exit 1
 fi
 
@@ -29,6 +31,7 @@ DEPTH=1
 QUIET=false
 ABSOLUTE=false
 INIT_DIR=""
+SEEDS=false
 POSITIONAL=()
 
 while [ $# -gt 0 ]; do
@@ -63,6 +66,8 @@ while [ $# -gt 0 ]; do
             INIT_DIR="${1#*=}"
             if [ -z "$INIT_DIR" ]; then echo "--init= requires a path" >&2; exit 1; fi
             shift ;;
+        --seeds)
+            SEEDS=true; shift ;;
         *) POSITIONAL+=("$1"); shift ;;
     esac
 done
@@ -74,7 +79,6 @@ if [ -n "$INIT_DIR" ]; then
         echo "ERROR: Integration results directory not found: $INIT_DIR" >&2
         exit 1
     fi
-    # Always absolute: the second field is read by a job that may run anywhere.
     INIT_DIR=$(realpath "$INIT_DIR")
 fi
 
@@ -91,9 +95,35 @@ if [ "$DRY" = false ]; then
     mkdir -p condor_output
 fi
 
+write_seeds() {
+    local parent file new
+    for parent in "${!SEED_RUNS[@]}"; do
+        file="$parent/seeds.txt"
+        [ "$SEEDS" = true ] || [ -f "$file" ] || continue
+        new=$(awk -v file="$file" '
+            BEGIN { while ((getline l < file) > 0) { split(l, f); known[f[1]]; used[f[2]] } }
+            NF && !($1 in known) { known[$1]; run[++n] = $1 }
+            END {
+                while (added < n && ("od -An -v -tu4 -w4 /dev/urandom" | getline) > 0)
+                    if (!($1 in used)) { used[$1]; print run[++added], $1 }
+            }' <<< "${SEED_RUNS[$parent]}")
+        [ -n "$new" ] || continue
+        if [ "$DRY" = true ]; then
+            echo "Would add $(wc -l <<< "$new") seeds to $(to_output_path "$file")"
+            continue
+        fi
+        [ -s "$file" ] && [ -n "$(tail -c 1 "$file")" ] && echo >> "$file"
+        printf '%s\n' "$new" >> "$file"
+        echo "Added $(wc -l <<< "$new") seeds to $(to_output_path "$file")"
+    done
+}
+
 dry_count=0
+declare -A SEED_RUNS=()
 emit_run() {
-    local line="$1"
+    local line="$1" run
+    run=$(realpath -m "$1")
+    SEED_RUNS[${run%/*}]+="${run##*/}"$'\n'
     if [ -n "$INIT_DIR" ]; then
         line="$line $INIT_DIR"
     fi
@@ -141,6 +171,14 @@ has_yaml_file() {
     find "$dir" -maxdepth 1 -type f -name "*.yaml" | grep -q .
 }
 
+has_subdirs() {
+    local sub
+    for sub in "$1"/*; do
+        [ -d "$sub" ] && return 0
+    done
+    return 1
+}
+
 should_skip_yoda() {
     local dir="$1"
     local dir_name
@@ -175,6 +213,17 @@ process_folder() {
 
     if [ -z "$n" ]; then
         echo "Listing subdirectories in $PREFIX..."
+        if ! has_subdirs "$PREFIX"; then
+            if ! has_yaml_file "$PREFIX" && ! has_yaml_file "$PREFIX/.."; then
+                echo "Skipping $PREFIX (no subdirectories, and no .yaml file found in $PREFIX or its parent)"
+            elif should_skip_yoda "$PREFIX"; then
+                echo "Skipping $PREFIX (matching YODA found)"
+            else
+                emit_run "$(to_output_path "$PREFIX")"
+                echo "Listed $PREFIX itself (it has no subdirectories)"
+            fi
+            return 0
+        fi
         prefix_has_yaml=false
         listed_total=0
         listed_direct_total=0
@@ -186,15 +235,7 @@ process_folder() {
         for dir in "$PREFIX"/*; do
             [ -d "$dir" ] || continue
 
-            has_subdirs=false
-            for subdir in "$dir"/*; do
-                if [ -d "$subdir" ]; then
-                    has_subdirs=true
-                    break
-                fi
-            done
-
-            if [ "$has_subdirs" = true ]; then
+            if has_subdirs "$dir"; then
                 if should_skip_yoda "$dir"; then
                     echo "Skipping all subdirectories of $dir (matching YODA already exists in $dir)"
                     continue
@@ -329,6 +370,8 @@ while [ $i -le $# ]; do
         process_folder "$folder" ""
     fi
 done
+
+write_seeds
 
 if [ "$DRY" = true ]; then
     echo "Dry run: nothing was created, and nothing was written to $OUTFILE."
