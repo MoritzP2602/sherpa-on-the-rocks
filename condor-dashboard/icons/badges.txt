@@ -1,0 +1,4 @@
+# A cluster whose submit-file name contains <word> gets the pill. <icon> is an
+# emoji or an image file in this directory; "-" leaves icon or label out.
+# word    icon         label
+sherpa    sherpa.png   Sherpa

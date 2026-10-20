@@ -8,6 +8,7 @@ Disclaimer: entire script written by claude opus
 
 from __future__ import annotations
 
+import functools
 import getpass
 import html
 import json
@@ -72,10 +73,13 @@ SSH_TIMEOUT = 120
 
 FILE_MARKER = "@@CONDOR-DASH-FILE@@"
 
-# Icons in JOB_KINDS may be an emoji, or the name of an image file placed in
-# OUT_DIR/<ICON_DIR>/ (e.g. ~/www/condor/icons/sherpa.png).
+# Icons in JOB_KINDS and in the badges file may be an emoji, or the name of an
+# image file placed in OUT_DIR/<ICON_DIR>/ (e.g. ~/www/condor/icons/sherpa.png).
 ICON_DIR = "icons"
 ICON_SUFFIXES = (".png", ".svg", ".jpg", ".jpeg", ".webp", ".gif", ".avif")
+# Badges by submit-file name, see load_badges(). Copied from icons/badges in
+# this repository, which gives Sherpa its badge; extend it with your own.
+BADGES_FILE = os.path.join(OUT_DIR, ICON_DIR, "badges.txt")
 
 CLUSTER_DIR = "clusters"
 
@@ -357,8 +361,6 @@ JOB_KINDS = [
     ("run_merge", "", "Merge"),
     ("yodamerge", "", "Merge"),
     ("rivet-merge", "", "Merge"),
-    ("run_sherpa", "sherpa.png", "Sherpa"),
-    ("sherpa", "sherpa.png", "Sherpa"),
 ]
 
 
@@ -369,6 +371,27 @@ def job_kind(cmdline=None, submit_file=None):
         if needle in haystack:
             return icon, label
     return "", ""
+
+
+@functools.lru_cache(maxsize=None)
+def load_badges(path=None):
+    """The badges from BADGES_FILE, as (word, icon, label) tuples.
+
+    One per line, "<word> <icon> <label>", e.g. "sherpa sherpa.png Sherpa"; "#"
+    starts a comment. A cluster whose submit-file name contains the word gets the
+    pill; icon and label work as in JOB_KINDS, and "-" leaves either out.
+    """
+    badges = []
+    try:
+        with open(path or BADGES_FILE, encoding="utf-8") as fh:
+            for line in fh:
+                fields = line.split("#", 1)[0].strip().split(None, 2)
+                if len(fields) == 3:
+                    word, icon, label = ("" if f == "-" else f for f in fields)
+                    badges.append((word.lower(), icon, label))
+    except FileNotFoundError:
+        pass
+    return tuple(badges)
 
 
 def parse_inventory(text):
@@ -450,7 +473,7 @@ margin-bottom:8px}
 table{width:100%;min-width:600px;border-collapse:separate;border-spacing:0}
 th{background:#fff;font-size:.72em;text-transform:uppercase;letter-spacing:.05em;color:#777;
 text-align:left;padding:11px 14px;border-bottom:1px solid #e1e6ea}
-td{padding:10px 14px;border-top:1px solid #eef1f4;font-size:.93em;vertical-align:top}
+td{padding:10px 14px;border-top:1px solid #eef1f4;font-size:.93em;vertical-align:top;white-space:nowrap}
 tr:hover td{background:#f7fafd}
 a{color:#1565c0;text-decoration:none}a:hover{text-decoration:underline}
 .num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
@@ -474,6 +497,7 @@ border-radius:20px;padding:2px 9px;margin-left:7px;white-space:nowrap}
 .bar{height:4px;background:#eef1f4;border-radius:3px;margin-top:9px;overflow:hidden;max-width:190px}
 .bar span{display:block;height:100%;background:#1b7a43}
 .kicon{height:1.15em;width:auto;vertical-align:-.22em;border-radius:2px}
+.kind+.kind{margin-left:4px}
 .card{background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.07);
 padding:12px 14px 8px;margin-bottom:16px}
 .chart{display:block;width:100%;height:210px}
@@ -563,13 +587,20 @@ def _icon_html(icon, prefix=""):
     return _esc(icon)
 
 
-def _badge(selection, prefix=""):
-    """A small pill naming the job type, e.g. Sherpa-logo for Sherpa."""
-    icon, label = job_kind(selection.cmdline, selection.submit_file)
-    if not label:
-        return ""
+def _pill(icon, label, prefix=""):
+    """One badge: an icon (emoji or image file in ICON_DIR) and/or a label."""
     rendered = _icon_html(icon, prefix)
-    return f'<span class="kind">{rendered}{" " if rendered else ""}{_esc(label)}</span>'
+    return f'<span class="kind">{rendered}{" " if rendered and label else ""}{_esc(label)}</span>'
+
+
+def _badge(selection, prefix=""):
+    """Small pills after the cluster name: the job type from JOB_KINDS, then one
+    for every line of BADGES_FILE whose word is in the submit-file name."""
+    icon, label = job_kind(selection.cmdline, selection.submit_file)
+    pills = [_pill(icon, label, prefix)] if label else []
+    name = os.path.splitext(os.path.basename(selection.submit_file or ""))[0].lower()
+    pills += [_pill(i, l, prefix) for w, i, l in load_badges() if w and w in name]
+    return "".join(pills)
 
 
 COUNTERS = [("done", "idle"), ("ok", "run"), ("timeout", "warn"),

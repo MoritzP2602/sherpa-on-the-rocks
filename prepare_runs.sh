@@ -9,8 +9,8 @@ if [ $# -lt 1 ]; then
     echo "  --dry         : (Optional) Show what would be created/listed without doing it."
     echo "  --exact-name  : Skip only directories with <dirname>.yoda or <dirname>.yoda.gz (default: skip directories with any .yoda/.yoda.gz file)."
     echo "  --depth|-d N  : Creation depth relative to each folder (default: 1)."
-    echo "  --absolute    : Write absolute run directory paths instead of paths relative to the"
-    echo "                  current directory."
+    echo "  --absolute    : Write absolute paths (run directories and --init) instead of paths"
+    echo "                  relative to the current directory."
     echo "  --init[=PATH] : Append the integration results directory to every line as a second"
     echo "                  field, so the job is told where to find it instead of searching."
     echo "                  Bare --init uses ./init; use --init=PATH for anywhere else."
@@ -125,7 +125,7 @@ emit_run() {
     run=$(realpath -m "$1")
     SEED_RUNS[${run%/*}]+="${run##*/}"$'\n'
     if [ -n "$INIT_DIR" ]; then
-        line="$line $INIT_DIR"
+        line="$line $(to_output_path "$INIT_DIR")"
     fi
     if [ "$DRY" = true ]; then
         dry_count=$((dry_count + 1))
