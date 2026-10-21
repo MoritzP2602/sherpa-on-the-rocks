@@ -36,24 +36,9 @@ def _tilde(path):
 
 
 # ============================== CONFIGURATION ==============================
-# Your ROCKS username. Only used for the subtitle on the index page. Defaults
-# to the account running this script; set it to a literal string if your ROCKS
-# username differs from your institute one.
 USERNAME = getpass.getuser()
-
-# The cluster. Resolves through the institute DNS search domain, so no
-# ~/.ssh/config entry is needed. Passwordless SSH to it is required.
 SSH_HOST = "rocks"
-
-# The always-on host this script runs on. Appears in the click-to-copy commands
-# shown on the generated pages.
-DASH_HOST = "ds9"
-
-# Where this script lives, used in those same commands. Derived from the file's
-# own location, so a copy placed anywhere is correct without editing.
 DASH_DIR = _tilde(os.path.dirname(os.path.abspath(__file__)))
-
-# Where the generated pages are written. Usually to your Institute web space.
 OUT_DIR = os.path.expanduser("~/www/condor")
 # ===========================================================================
 
@@ -61,24 +46,19 @@ SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15"]
 STATE_FILE = os.path.expanduser("~/.cache/condor-dashboard/state.json")
 HISTORY_FILE = os.path.expanduser("~/.cache/condor-dashboard/history.csv")
 HISTORY_DAYS = 400
+SUMMARY_VERSION = 1
 REGISTRY_PATH = "$HOME/.condor-registry"
 
 FORGOTTEN_FILE = os.path.expanduser("~/.config/condor-dashboard/forgotten")
 RETENTION_DAYS = 7
 STALE_MINUTES = 30
-# How often the systemd timer runs this script; drives the countdown on the
-# index page, so keep it equal to the timer's OnCalendar step.
 REFRESH_MINUTES = 5
 SSH_TIMEOUT = 120
 
 FILE_MARKER = "@@CONDOR-DASH-FILE@@"
 
-# Icons in JOB_KINDS and in the badges file may be an emoji, or the name of an
-# image file placed in OUT_DIR/<ICON_DIR>/ (e.g. ~/www/condor/icons/sherpa.png).
 ICON_DIR = "icons"
 ICON_SUFFIXES = (".png", ".svg", ".jpg", ".jpeg", ".webp", ".gif", ".avif")
-# Badges by submit-file name, see load_badges(). Copied from icons/badges in
-# this repository, which gives Sherpa its badge; extend it with your own.
 BADGES_FILE = os.path.join(OUT_DIR, ICON_DIR, "badges.txt")
 
 CLUSTER_DIR = "clusters"
@@ -91,9 +71,6 @@ REFRESH_COMMAND = "{}/generate.py".format(DASH_DIR)
 STATUS_IDLE = 1
 STATUS_RUNNING = 2
 STATUS_HELD = 5
-
-# ---------------------------------------------------------------- data model
-
 
 @dataclass
 class Entry:
@@ -136,7 +113,8 @@ class JobTiming:
 
 @dataclass
 class OverviewSummary:
-    """Aggregate of one overview log."""
+    """Aggregate of one overview log. `events` holds (status, events, totaltime)
+    for every job that reported an event count."""
 
     done: int = 0
     ok: int = 0
@@ -147,6 +125,11 @@ class OverviewSummary:
     restarted: int = 0
     problems: list = field(default_factory=list)
     timings: list = field(default_factory=list)
+    events: list = field(default_factory=list)
+
+    @property
+    def total_events(self):
+        return sum(n for _, n, _ in self.events)
 
 
 @dataclass
@@ -193,8 +176,6 @@ class InventoryItem:
     mtime: int
     path: str
 
-
-# ---------------------------------------------------------------- parsing
 
 _HEAD = re.compile(r"^\[(COMPLETE|FAILED|TIMEOUT|REMOVED)\]\s+(\d+)\.(\d+)$")
 _WALL_LIMIT = re.compile(r"Hit wall time limit of\s+(\S+)\s+seconds")
@@ -272,6 +253,9 @@ def parse_overview(text):
         timing = _timing(entry)
         if timing is not None:
             summary.timings.append(timing)
+        events = _int_or_none(entry.events) if entry.events else None
+        if events is not None:
+            summary.events.append((entry.status, events, entry.totaltime))
     return summary
 
 
@@ -423,9 +407,6 @@ def split_fetched_logs(stream, marker=FILE_MARKER):
     return files
 
 
-# ---------------------------------------------------------------- selection
-
-
 def select_clusters(registry, queue, mtimes, now, retention_days=RETENTION_DAYS,
                     forgotten=()):
     """Choose which clusters to display, newest first."""
@@ -457,8 +438,6 @@ def select_clusters(registry, queue, mtimes, now, retention_days=RETENTION_DAYS,
     selections.sort(key=lambda s: (s.timestamp is not None, s.timestamp), reverse=True)
     return selections
 
-
-# ---------------------------------------------------------------- rendering
 
 _CSS = """
 html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
@@ -508,8 +487,6 @@ padding:12px 14px 8px;margin-bottom:16px}
 .stack{display:flex;height:22px;border-radius:6px;overflow:hidden;background:#eef1f4;
 margin:6px 0 8px}
 .stack span{display:block;height:100%}
-/* Label, command and button are grid items, not inline text, so the three line
-   up in columns however long an individual label or command is. */
 .cmds{margin-top:26px;display:grid;grid-template-columns:auto auto auto;
 justify-content:start;align-items:center;gap:7px 10px}
 .cmd{display:contents;font-size:.85em;color:#5a6570}
@@ -612,10 +589,21 @@ def _count(value, css):
     return f"<span class='pill {css if value else 'zero'}'>{value}</span>"
 
 
+def _events(summary):
+    """The summed event count as a pill, or "" when no job reported one."""
+    if not summary.events:
+        return ""
+    total = summary.total_events
+    return f"<span class='pill {'idle' if total else 'zero'}'>{total:,}</span>"
+
+
 def _counts(summary):
-    """Every counter as a labelled pill, for use outside a table column."""
-    return " &middot; ".join(f"{_count(getattr(summary, field), css)} {field}"
-                             for field, css in COUNTERS)
+    """Every counter as a labelled pill, for use outside a table column, then
+    the event count if any job reported one."""
+    pills = [f"{_count(getattr(summary, field), css)} {field}" for field, css in COUNTERS]
+    if summary.events:
+        pills.append(f"{_events(summary)} events")
+    return " &middot; ".join(pills)
 
 
 def _table(rows):
@@ -650,13 +638,11 @@ def _page(title, body, generated_at):
     )
 
 
-# ------------------------------------------------------------- load history
-
 DAY_BIN_MINUTES = 15
-DAY_BINS = 100     # 15 minutes each: the last 24 hours, plus the hour ahead
-TOD_BINS = 24 * 60 // DAY_BIN_MINUTES   # time-of-day bins backing the average
-WEEK_DAYS = 8      # the last 7 days, plus tomorrow
-WEEK_BINS = WEEK_DAYS * 24   # one per hour
+DAY_BINS = 100
+TOD_BINS = 24 * 60 // DAY_BIN_MINUTES
+WEEK_DAYS = 8
+WEEK_BINS = WEEK_DAYS * 24
 
 
 def parse_sample(text):
@@ -799,8 +785,6 @@ def weekly_series(rows, now):
              for date in dates for hour in range(24)])
 
 
-# ------------------------------------------------------------- load charts
-
 _PLOT_W, _PLOT_H = 1040, 210
 _PLOT_L, _PLOT_R, _PLOT_T, _PLOT_B = 46, 12, 12, 30
 
@@ -862,7 +846,6 @@ def render_chart(series, x_labels):
              f'viewBox="0 0 {_PLOT_W} {_PLOT_H}" '
              f'role="img" preserveAspectRatio="none">']
 
-    # horizontal grid + y labels
     for fraction in (0, 0.5, 1):
         y = _PLOT_T + plot_h - fraction * plot_h
         parts.append(f'<line x1="{_PLOT_L}" y1="{y:.1f}" x2="{_PLOT_W - _PLOT_R}" '
@@ -870,7 +853,6 @@ def render_chart(series, x_labels):
         parts.append(f'<text x="{_PLOT_L - 8}" y="{y + 4:.1f}" text-anchor="end" '
                      f'font-size="11" fill="#8a949e">{int(top * fraction)}</text>')
 
-    # x labels
     for index, label in enumerate(x_labels):
         if not label:
             continue
@@ -937,8 +919,6 @@ def render_load_charts(history, now):
         "</div>",
     ])
 
-
-# ------------------------------------------------------------- runtime plots
 
 STATUS_ORDER = ["COMPLETE", "FAILED", "TIMEOUT", "REMOVED"]
 STATUS_COLOURS = {"COMPLETE": "#1b7a43", "FAILED": "#b3261e",
@@ -1214,6 +1194,42 @@ def render_runtime(summary):
     return "\n".join(parts)
 
 
+def render_events(summary):
+    """The Events section of a cluster page, or "" when no job reported a count:
+    jobs, events, mean per job and rate per final status, then all together."""
+    if not summary.events:
+        return ""
+    groups = [(status, [e for e in summary.events if e[0] == status])
+              for status in STATUS_ORDER]
+    groups = [(status, jobs) for status, jobs in groups if jobs]
+    if len(groups) > 1:
+        groups.append((None, summary.events))
+    rows = ["<tr><th>Status</th><th class='num'>Jobs</th><th class='num'>Events</th>"
+            "<th class='num'>Per job</th><th class='num'>Per hour</th></tr>"]
+    for status, jobs in groups:
+        events = sum(n for _, n, _ in jobs)
+        timed = [(n, t) for _, n, t in jobs if t]
+        hours = sum(t for _, t in timed) / 3600
+        rate = f"{sum(n for n, _ in timed) / hours:,.0f}" if hours else "&ndash;"
+        if status:
+            css = {"COMPLETE": "run", "FAILED": "bad"}.get(status, "warn")
+            label = f"<span class='pill {css}'>{_esc(status)}</span>"
+        else:
+            label = "All jobs"
+        rows.append(f"<tr><td>{label}</td><td class='num'>{len(jobs)}</td>"
+                    f"<td class='num'>{events:,}</td>"
+                    f"<td class='num'>{events / len(jobs):,.0f}</td>"
+                    f"<td class='num'>{rate}</td></tr>")
+    return "\n".join([
+        "<h2>Events</h2>",
+        '<p class="sub">Events by final job status. Each job&rsquo;s count is the last '
+        "one Sherpa printed, so it can be slightly low for a job that was cut off. "
+        "Per hour divides by the jobs&rsquo; runtime."
+        f"{_basis(len(summary.events), summary.done)}</p>",
+        _table(rows),
+    ])
+
+
 def _gib(blocks):
     """1K blocks as GiB, the unit the quota is actually set in."""
     return f"{blocks / 1048576:.0f} GiB"
@@ -1292,7 +1308,7 @@ def render_index(selections, summaries, generated_at, queue_ok=True, history=Non
         rows = ["<tr><th>Cluster</th><th>Name</th><th class='num'>Done</th>"
                 "<th class='num'>OK</th><th class='num'>Timeout</th>"
                 "<th class='num'>Removed</th><th class='num'>Failed</th>"
-                "<th class='num'>Restarted</th>"
+                "<th class='num'>Restarted</th><th class='num'>Events</th>"
                 "<th>Submitted</th><th>Directory</th></tr>"]
         for sel in finished:
             summary = summaries.get(sel.cluster)
@@ -1300,7 +1316,7 @@ def render_index(selections, summaries, generated_at, queue_ok=True, history=Non
             badge = _badge(sel)
             if summary is None:
                 cells = (f"<td>{name}{badge}</td>"
-                         f"<td colspan='{len(COUNTERS)}' class='none'>no overview file</td>")
+                         f"<td colspan='{len(COUNTERS) + 1}' class='none'>no overview file</td>")
             else:
                 link = (f"<a href='{CLUSTER_DIR}/{_esc(sel.cluster)}.html'>{name}</a>"
                         f"{badge}")
@@ -1308,7 +1324,7 @@ def render_index(selections, summaries, generated_at, queue_ok=True, history=Non
                     f"<td class='num'>{_count(getattr(summary, field), css)}</td>"
                     for field, css in COUNTERS
                 )
-                cells = f"<td>{link}</td>{counts}"
+                cells = f"<td>{link}</td>{counts}<td class='num'>{_events(summary)}</td>"
             rows.append(f"<tr><td>{_esc(sel.cluster)}</td>{cells}"
                         f"<td>{_when(sel.timestamp)}</td>"
                         f"<td class='path'>{_esc(sel.submit_dir)}</td></tr>")
@@ -1378,6 +1394,8 @@ def render_cluster(selection, summary, log_name, generated_at):
             )
         parts.append(_table(rows))
 
+    parts.append(render_events(summary))
+
     forget = FORGET_COMMAND.format(cluster=selection.cluster)
     parts.append('<div class="cmds">'
                  + _command("Remove this cluster from the dashboard", forget)
@@ -1402,8 +1420,6 @@ def build_pages(selections, summaries, raw_logs, generated_at, queue_ok=True,
             pages[f"{CLUSTER_DIR}/{log_name}"] = raw_logs[sel.cluster]
     return pages
 
-
-# ---------------------------------------------------------------- output
 
 _GENERATED = re.compile(r"^(index\.html|\d+\.html|overview\.\d+\.log)$")
 
@@ -1439,8 +1455,6 @@ def prune(directory, keep):
                 except OSError:
                     pass
 
-
-# ---------------------------------------------------------------- remote access
 
 _INVENTORY_SCRIPT = r"""
 set -u
@@ -1524,9 +1538,6 @@ def fetch_logs(paths, remote=run_remote):
     return split_fetched_logs(out) if ok else {}
 
 
-# ---------------------------------------------------------------- state cache
-
-
 def load_state(path=STATE_FILE):
     try:
         with open(path) as fh:
@@ -1549,6 +1560,7 @@ def summary_to_dict(summary):
         "unparsed": summary.unparsed, "restarted": summary.restarted,
         "problems": [list(astuple(p)) for p in summary.problems],
         "timings": [list(astuple(t)) for t in summary.timings],
+        "events": [list(e) for e in summary.events],
     }
 
 
@@ -1561,16 +1573,16 @@ def summary_from_dict(data):
     )
     summary.problems = [Entry(*p) for p in data.get("problems", [])]
     summary.timings = [JobTiming(*t) for t in data.get("timings", [])]
+    summary.events = [tuple(e) for e in data.get("events", [])]
     return summary
 
 
 def cached(record, mtime):
     """Whether a cluster's cached summary can be reused: the log has not changed
-    since it was parsed."""
-    return (record.get("mtime") == mtime)
-
-
-# ---------------------------------------------------------------- main
+    since it was parsed, by the parser of this SUMMARY_VERSION. Bump
+    SUMMARY_VERSION whenever parse_overview changes what a summary holds."""
+    return (record.get("mtime") == mtime
+            and record.get("version") == SUMMARY_VERSION)
 
 
 def main():
@@ -1606,6 +1618,7 @@ def main():
                 summary = parse_overview(fetched[item.path])
                 raw_logs[sel.cluster] = fetched[item.path]
                 clusters[sel.cluster] = {"mtime": item.mtime,
+                                         "version": SUMMARY_VERSION,
                                          "summary": summary_to_dict(summary)}
             elif sel.cluster in clusters and "summary" in clusters[sel.cluster]:
                 summary = summary_from_dict(clusters[sel.cluster]["summary"])

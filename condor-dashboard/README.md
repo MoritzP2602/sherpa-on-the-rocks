@@ -1,65 +1,39 @@
 # condor-dashboard
 
-This directory generates a static overview of your HTCondor jobs and publishes it on your institute webpage, so you can check on a production run from anywhere without logging into the cluster.
+A static overview of your HTCondor jobs on ROCKS, published on your institute webpage. A systemd timer on an always-on institute host (`ds9`) polls ROCKS over SSH every five minutes and writes plain HTML; nothing runs on the cluster.
 
-It reads the `overview.<cluster>.log` files written by the worker scripts of the submission systems in this repository — `run_sherpa.sh`, `merge/run_merge.sh` and the `apprentice/` and `professor/` workers — so it only reports on jobs submitted with them. Each cluster is badged by the tool it ran: `Sherpa`, `Merge`, `Apprentice` or `Professor`.
-
-Runs of the automatic tuning workflow in `tune/` are included: it drives those same workers, and nests their logs one level deeper, under `condor_output/<DAG node>/`, which the probe also looks in.
-
-Nothing runs on the cluster. A timer on an always-on institute host (`ds9`) polls ROCKS over SSH every five minutes and writes plain HTML into your webspace.
+It reads the `overview.<cluster>.log` files written by this repository's workers (`run_sherpa.sh`, `merge/run_merge.sh`, `apprentice/`, `professor/`, and the `tune/` workflow, whose logs sit one level deeper under `condor_output/<DAG node>/`), so it only reports on jobs submitted with them. For each cluster it shows job counts by final status, the number of generated events, runtime and CPU-efficiency histograms, and the jobs that failed.
 
 **Requirements:** `python3` 3.7 or newer on `ds9`, and passwordless SSH from the institute network to `rocks`.
 
 
 ## Setup
 
-Four steps, on two different machines. Do them in order.
-
-### 1. Prepare your webspace (on ds9)
-
-Institute webpages are served from `/share/scratch1/$USER/www`. Link it into your home directory, since that is where the generator writes by default:
+### 1. Webspace (on ds9)
 
 ```bash
 ln -s /share/scratch1/$USER/www ~/www
-```
-
-Apache will not follow that symlink unless you allow it. Create `~/.htaccess` containing:
-
-```
-Options FollowSymLinks
-```
-
-Then create the output directory and make it world-readable, and install the badge icons and `badges.txt` (`-n` keeps a `badges.txt` you extended):
-
-```bash
 mkdir -p ~/www/condor/icons
 chmod a+rX ~/www ~/www/condor
 cp -n ~/sherpa-on-the-rocks/condor-dashboard/icons/* ~/www/condor/icons/
 ```
 
-Note: if your webspace is somewhere else, skip the symlink and point `OUT_DIR` at it directly in step 2.
+Apache only follows the symlink if `~/.htaccess` contains `Options FollowSymLinks`. If your webspace is elsewhere, skip the symlink and set `OUT_DIR` instead.
 
 ### 2. Configure
 
-Open `generate.py` and look at the `CONFIGURATION` block near the top. Every value is a working default at the institute, so **most users change nothing here**. Two cases need an edit:
+The `CONFIGURATION` block at the top of `generate.py` works as is at the institute:
 
-- Your webspace is not reachable at `~/www/condor` — set `OUT_DIR`.
-- Your ROCKS username differs from your institute username — set `USERNAME` to the ROCKS one. It is only used for the subtitle on the index page.
+- `USERNAME`: shown in the index subtitle. Defaults to the current account; set it if your ROCKS username differs.
+- `SSH_HOST`: the cluster, `rocks`.
+- `DASH_DIR`: where the scripts live, for the copy-to-clipboard commands on the pages. Derived from the file's location.
+- `OUT_DIR`: where the pages are written, `~/www/condor`.
 
-`USERNAME` otherwise defaults to the account running the script, and `DASH_DIR` works out where this directory is on its own, so a copy placed anywhere is correct without editing.
-
-The badges after each cluster's name come from `~/www/condor/icons/badges.txt`. Each line is `<word> <icon> <label>`, and every line whose word occurs in the cluster's submit-file name (e.g. sherpa.jdf) adds a pill. The icon is an emoji or a file in `~/www/condor/icons/`:
-
-```
-# word      icon         label
-sherpa      sherpa.png   Sherpa
-```
+Badges after a cluster's name come from `~/www/condor/icons/badges.txt`, one `<word> <icon> <label>` per line: a cluster whose submit-file name contains the word gets the pill. The icon is an emoji or a file in `~/www/condor/icons/`, and `-` leaves the icon or label out. Merge, Apprentice and Professor jobs are recognised without it.
 
 ### 3. Record submissions (on ROCKS)
 
-`condor_q` only knows about jobs that are still in the queue, and it cannot tell you which submit file a job came from. To keep that information after a job finishes, we need to wrap `condor_submit` so it records each submission.
-
-Add to your ROCKS `~/.bashrc`:
+`condor_q` forgets finished jobs and never knows the submit file, so wrap `condor_submit` in your ROCKS `~/.bashrc`. Each submission appends cluster id, submit directory, time and submit file to `~/.condor-registry`; output and exit status are unchanged.
 
 ```bash
 # --- condor dashboard: record cluster id, submit dir and submit file ---
@@ -87,11 +61,9 @@ _condor_register() {
 condor_submit()     { _condor_register condor_submit "$@"; }
 ```
 
-This appends one tab-separated line per submission to `~/.condor-registry` on ROCKS, holding the cluster id, the submit directory, the timestamp and the submit file name. `condor_submit` behaves exactly as before, and its exit status is passed through unchanged.
+### 4. Schedule (on ds9)
 
-### 4. Schedule regeneration (on ds9)
-
-Create `~/.config/systemd/user/condor-dashboard.service`:
+`~/.config/systemd/user/condor-dashboard.service` (adjust `ExecStart` if the repository is not in your home directory):
 
 ```ini
 [Unit]
@@ -103,9 +75,7 @@ Type=oneshot
 ExecStart=/usr/bin/python3 %h/sherpa-on-the-rocks/condor-dashboard/generate.py
 ```
 
-Adjust `ExecStart` if you put this repository somewhere other than your home directory.
-
-Create `~/.config/systemd/user/condor-dashboard.timer`:
+`~/.config/systemd/user/condor-dashboard.timer`:
 
 ```ini
 [Unit]
@@ -119,49 +89,26 @@ Persistent=true
 WantedBy=timers.target
 ```
 
-Enable it, and allow it to keep running when you are not logged in:
+Enable it, keep it running while you are logged out, and generate once to check:
 
 ```bash
 systemctl --user daemon-reload
 systemctl --user enable --now condor-dashboard.timer
 loginctl enable-linger $USER
-```
-
-Then generate the pages once by hand to check everything works:
-
-```bash
 systemctl --user start condor-dashboard.service
-ls -l ~/www/condor/
 ```
 
-You should see this, with one pair of files under `clusters/` per recent cluster:
-
-```
-~/www/condor/
-├── index.html
-├── icons/            sherpa.png, badges.txt
-└── clusters/
-    ├── 38675226.html
-    └── overview.38675226.log
-```
-
-`clusters/` is created for you on the first run. Your dashboard is now at `https://www.theorie.physik.uni-goettingen.de/~$USER/condor/`.
+`~/www/condor/` now holds `index.html` and, in `clusters/`, a page and a copy of the overview log per cluster. The dashboard is at `https://www.theorie.physik.uni-goettingen.de/~$USER/condor/`.
 
 
 ## Usage
 
-The pages regenerate every five minutes on their own. Each page carries the time it was generated, and shows a warning banner if it is more than 30 minutes old. If you change the timer's `OnCalendar` step, set `REFRESH_MINUTES` in `generate.py` to match, so the countdown on the index page stays right.
-
 ```bash
 ~/sherpa-on-the-rocks/condor-dashboard/generate.py         # refresh now
-~/sherpa-on-the-rocks/condor-dashboard/forget.py <cluster> # drop a cluster
-~/sherpa-on-the-rocks/condor-dashboard/forget.py --all     # empty the dashboard
+~/sherpa-on-the-rocks/condor-dashboard/forget.py <cluster> # hide a cluster
+~/sherpa-on-the-rocks/condor-dashboard/forget.py --all     # hide everything not in the queue
 ```
 
-`forget.py` hides a cluster from the dashboard by appending its id to `~/.config/condor-dashboard/forgotten` on `ds9`, then drops its cached state, its page and its copied log. It refuses to forget a cluster that still has jobs in the queue.
+Clusters drop off on their own `RETENTION_DAYS` (7) days after submission. `forget.py` hides one earlier by adding its id to `~/.config/condor-dashboard/forgotten` on `ds9`, and refuses a cluster that still has jobs in the queue. To bring one back, delete its line and rerun `generate.py`.
 
-`forget.py --all` does the same for every cluster the dashboard currently lists, leaving anything still in the queue alone and naming what it kept.
-
-Forgetting is only a filter (not a deletion) and is reversible: delete a line from the forget list, rerun `generate.py`, and the cluster comes back with its name and counts intact.
-
-Clusters disappear from the dashboard on their own 7 days after submission, so `forget.py` is only for clearing something out early. Change `RETENTION_DAYS` in `generate.py` if you want a different window.
+Pages warn when they are more than 30 minutes old. If you change the timer's `OnCalendar` step, set `REFRESH_MINUTES` in `generate.py` to match, so the countdown on the index page stays right.
