@@ -46,6 +46,6 @@ if ! command -v app-tools-split_reweighting >/dev/null 2>&1; then
   exit 1
 fi
 run_cmd "4" "$TAG" app-tools-split_reweighting newscan.rew "$PATTERN" \
-                   --variations newscan.rew.var.dat --overwrite --quiet
+                   --var-file newscan.rew.var.dat --overwrite --quiet
 
 log_msg "4" "$TAG" "Completed successfully."

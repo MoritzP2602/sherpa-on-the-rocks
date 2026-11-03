@@ -42,7 +42,7 @@ add_validation_grid() {
   if [[ "${VALIDATION_ONLY_ERR:-0}" == "1" ]]; then
     prefix="${name}.err"
   fi
-  local cmd=(app-tools-create_grid tune "$root/$folder" template.yaml --outdir validation --tune-prefix "$prefix")
+  local cmd=(app-tools-create_grid tune "$root/$folder" template.yaml --outdir validation --prefix "$prefix")
   run_cmd "10" "$TAG" "${cmd[@]}"
 }
 
