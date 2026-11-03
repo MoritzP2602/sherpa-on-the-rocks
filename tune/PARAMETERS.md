@@ -63,7 +63,7 @@
 
 ### APP_TOOLS_INSTALLATION
 - **Type**: Path
-- **Description**: Path to the app-tools installation directory. You can check the path using e.g. `which app-tools-create_grid`.
+- **Description**: Path to the app-tools installation directory (app-tools 3.0.0). You can check the path using e.g. `which app-tools-create_grid`, and the version using `app-tools-create_grid --version`.
 
 ### APPRENTICE_INSTALLATION
 - **Type**: Path

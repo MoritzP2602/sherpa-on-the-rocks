@@ -4,7 +4,7 @@ This folder contains scripts for a fully automatic tuning workflow on the ROCKS 
 
 For a quick guide, see the `example/` directory. All parameters are listed in `PARAMETERS.md`.
 
-`tune.py` reads a YAML steering file and submits one HTCondor DAG covering the whole procedure, from event generation to the chi2 and parameter plots. Most phases run the scripts of the standalone submission systems (`../run_sherpa.sh`, `../merge/`, `../apprentice/`, `../professor/`).
+`tune.py` reads a YAML steering file and submits one HTCondor DAG covering the whole procedure, from event generation to the chi2 and parameter plots. Most phases run the scripts of the standalone submission systems (`../run_sherpa.sh`, `../merge/`, `../apprentice/`, `../professor/`). Requires app-tools 3.0.0.
 
 Set `START_PHASE` and/or `END_PHASE` in the steering file to run only a slice of the pipeline; tune.py checks that everything the first phase needs is already on disk before it submits anything.
 
